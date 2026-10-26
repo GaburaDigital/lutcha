@@ -12,7 +12,9 @@
     "qrcode": "node testes/gerar_qrcode.mjs"
   },
   "dependencies": {
-    "three": "0.170.0"
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "three": "0.170.0",
+    "trystero": "0.26.0"
   },
   "devDependencies": {
     "@types/three": "0.170.0",

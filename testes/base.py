@@ -7,6 +7,7 @@ F = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fotos') + '/'
 os.makedirs(F, exist_ok=True)
 PORTA = 4181
 URL = os.environ.get('URL_JOGO', f'http://localhost:{PORTA}/')
+URL_PATAS = URL + 'patas.html'
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def _respondendo():

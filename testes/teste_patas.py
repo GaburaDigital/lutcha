@@ -26,7 +26,7 @@ def vr(pg, js): return pg.evaluate('async () => { const t = window.__teste; ' + 
 
 with servidor(), sync_playwright() as p:
     b, pg, erros = abrir(p, 1100, 700)
-    pg.goto(URL); pg.wait_for_function('() => window.__teste', timeout=60000); time.sleep(1.5)
+    pg.goto(URL_PATAS); pg.wait_for_function('() => window.__teste', timeout=60000); time.sleep(1.5)
     pg.screenshot(path=F + '00_tela_pc.png')
     print('triângulos:', T(pg, 'return t.triangulos()'))
     pg.evaluate('() => {' + VR + '}')
