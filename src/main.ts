@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { entrada, ligarControlesVR, lerVR, vibrar, type Lado } from './xr/entrada';
-import { criarMaoHumana, criarPata, type CorPelo, type EstadoMao, type Mao, type Personagem, type Sabre } from './xr/patas';
+import { criarMaoHumana, criarPata, type CorPelo, type EstadoMao, type Mao, type Personagem } from './xr/patas';
 
 // ---------- mundo ----------
 const tela = document.getElementById('tela3d') as HTMLDivElement;
@@ -45,11 +45,12 @@ boneco(1.3, '#d4afaf', '#348a2f', -1.0, -2.6);  // Gabura
 
 // ---------- estado do teste ----------
 const OLHOS: Record<Personagem, number> = { urso: 2.45, humano: 1.2 }; // altura dos olhos do personagem (m)
-const estado: EstadoMao & { personagem: Personagem; alturaReal: number } = {
-  personagem: 'urso', cor: 'normal', agulhas: 0, furadeira: false, carga: 0, sabre: 'desligado', tamanho: 1.5, alturaReal: 1.6,
+type MaoDoSabre = 'nenhuma' | Lado;
+const estado: EstadoMao & { personagem: Personagem; alturaReal: number; sabreMao: MaoDoSabre } = {
+  personagem: 'urso', cor: 'normal', agulhas: 0, furadeira: false, carga: 0, sabre: false, sabreMao: 'nenhuma', tamanho: 1.3, alturaReal: 1.6,
 };
 const CICLO_COR: CorPelo[] = ['normal', 'berserker', 'dourado'];
-const CICLO_SABRE: Sabre[] = ['desligado', 'pontas', 'nos'];
+const CICLO_SABRE: MaoDoSabre[] = ['nenhuma', 'dir', 'esq'];
 
 // cada controle carrega uma pata e uma mão humana; só uma aparece
 const maos: Record<Lado, { pata: Mao; humana: Mao }> = {
@@ -73,7 +74,7 @@ const painelCanvas = document.createElement('canvas'); painelCanvas.width = 1024
 const painelTex = new THREE.CanvasTexture(painelCanvas); painelTex.colorSpace = THREE.SRGBColorSpace;
 const painel = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.49), new THREE.MeshBasicMaterial({ map: painelTex, transparent: true }));
 painel.position.set(0, 1.25, -1.3); painel.rotation.x = -0.12; rig.add(painel);
-const NOMES_SABRE: Record<Sabre, string> = { desligado: 'desligado', pontas: 'lâminas nas pontas', nos: 'lâminas nos nós (Wolverine)' };
+const NOMES_SABRE: Record<MaoDoSabre, string> = { nenhuma: 'desligado', dir: 'mão direita', esq: 'mão esquerda' };
 function desenharPainel(): void {
   const c = painelCanvas.getContext('2d')!; const W = painelCanvas.width, H = painelCanvas.height;
   c.clearRect(0, 0, W, H);
@@ -84,7 +85,7 @@ function desenharPainel(): void {
   const linhas: [string, string][] = [
     ['A', urso ? 'UrsoBura (trocar para o Gabura)' : 'Gabura, modo humano (trocar para o urso)'],
     ['B', urso ? 'Soco furadeira: ' + (estado.furadeira ? `engatilhado · carga ${Math.round(estado.carga * 100)}%` : 'desligado') : '—'],
-    ['X', urso ? 'Sabre laser: ' + NOMES_SABRE[estado.sabre] : '—'],
+    ['X', urso ? 'Sabre laser: ' + NOMES_SABRE[estado.sabreMao] : '—'],
     ['Y', urso ? 'Agulhas: ' + (estado.agulhas ? estado.agulhas + '×' : 'sem carga') : '—'],
     ['Analógico D ↑↓', urso ? `Tamanho da pata: ${estado.tamanho.toFixed(1).replace('.', ',')}×` : '—'],
     ['Clique analógico D', urso ? 'Cor do pelo (vista pelo Piranbenja): ' + estado.cor : '—'],
@@ -115,9 +116,9 @@ const pc = { gatilho: 0, grip: 0 };
 // ---------- botões (VR e PC) ----------
 function acao(nome: string): void {
   const urso = estado.personagem === 'urso';
-  if (nome === 'A') { estado.personagem = urso ? 'humano' : 'urso'; estado.furadeira = false; estado.sabre = 'desligado'; }
-  else if (nome === 'B' && urso) { estado.furadeira = !estado.furadeira; estado.carga = 0; if (estado.furadeira) estado.sabre = 'desligado'; }
-  else if (nome === 'X' && urso) { estado.sabre = CICLO_SABRE[(CICLO_SABRE.indexOf(estado.sabre) + 1) % 3]; if (estado.sabre !== 'desligado') estado.furadeira = false; }
+  if (nome === 'A') { estado.personagem = urso ? 'humano' : 'urso'; estado.furadeira = false; estado.sabreMao = 'nenhuma'; }
+  else if (nome === 'B' && urso) { estado.furadeira = !estado.furadeira; estado.carga = 0; if (estado.furadeira) estado.sabreMao = 'nenhuma'; }
+  else if (nome === 'X' && urso) { estado.sabreMao = CICLO_SABRE[(CICLO_SABRE.indexOf(estado.sabreMao) + 1) % 3]; if (estado.sabreMao !== 'nenhuma') estado.furadeira = false; }
   else if (nome === 'Y' && urso) estado.agulhas = estado.agulhas === 0 ? 3 : estado.agulhas === 3 ? 6 : 0;
   else if (nome === 'analogicoD' && urso) estado.cor = CICLO_COR[(CICLO_COR.indexOf(estado.cor) + 1) % 3];
   else if (nome === 'analogicoE') medirAltura();
@@ -134,7 +135,7 @@ const estadoPC = document.getElementById('estadoPC') as HTMLParagraphElement;
 function atualizarTelaPC(): void {
   const urso = estado.personagem === 'urso';
   estadoPC.textContent = urso
-    ? `UrsoBura · pata ${estado.tamanho.toFixed(1).replace('.', ',')}× · furadeira ${estado.furadeira ? 'engatilhada' : 'desligada'} · sabre ${NOMES_SABRE[estado.sabre]} · agulhas ${estado.agulhas || 'sem carga'} · pelo ${estado.cor}`
+    ? `UrsoBura · pata ${estado.tamanho.toFixed(1).replace('.', ',')}× · furadeira ${estado.furadeira ? 'engatilhada' : 'desligada'} · sabre ${NOMES_SABRE[estado.sabreMao]} · agulhas ${estado.agulhas || 'sem carga'} · pelo ${estado.cor}`
     : 'Gabura (modo humano): sem especiais, só soca e agarra';
   for (const b of document.querySelectorAll<HTMLButtonElement>('.so-urso')) b.disabled = !urso;
 }
@@ -193,7 +194,7 @@ function quadro(): void {
   vibracaoEspera -= dt;
   if (vibracaoEspera <= 0 && estado.personagem === 'urso') {
     if (estado.furadeira) { for (const l of ['esq', 'dir'] as const) vibrar(l, 0.1 + 0.5 * estado.carga, 60); vibracaoEspera = 0.1; }
-    else if (estado.sabre !== 'desligado') { for (const l of ['esq', 'dir'] as const) vibrar(l, 0.06, 40); vibracaoEspera = 0.2; }
+    else if (estado.sabreMao !== 'nenhuma') { vibrar(estado.sabreMao, 0.06, 40); vibracaoEspera = 0.2; }
   }
   if (estado.furadeira && Math.round(t * 4) !== Math.round((t - dt) * 4)) desenharPainel();
   for (const lado of ['esq', 'dir'] as const) {
@@ -201,7 +202,7 @@ function quadro(): void {
     par.pata.suporte.visible = urso; par.humana.suporte.visible = !urso;
     const [g, gr] = valores(lado);
     const mao = urso ? par.pata : par.humana;
-    mao.atualizar(g, gr, estado, rig.scale.x, t, dt);
+    mao.atualizar(g, gr, { ...estado, sabre: estado.sabreMao === lado }, rig.scale.x, t, dt);
     mao.apontarAntebraco(entrada.modo === 'vr' ? cotovelo(lado) : null);
   }
   if (entrada.modo === 'pc') orbita.update();

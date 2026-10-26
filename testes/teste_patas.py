@@ -45,13 +45,15 @@ with servidor(), sync_playwright() as p:
     vr(pg, "__vr.dedos(0, 0);"); time.sleep(0.6)
     print('furadeira com a mão aberta (pose travada no punho?):', T(pg, "const j = t.maos.dir.pata; return +j.raiz.children.find(c => c.type === 'Group' && c.children.length && c.position.z < -0.15).rotation.x.toFixed(2)"))
     vr(pg, "await __vr.apertar('dir', 5);")  # desliga
-    # sabre: X → pontas → nós → desligado; gatilho e grip não mexem nos dedos
-    vr(pg, "await __vr.apertar('esq', 4); __vr.dedos(1, 0);"); time.sleep(0.5)
-    print('sabre:', T(pg, 'return t.estado.sabre'), '· lâminas visíveis:', T(pg, "let n = 0; t.maos.dir.pata.raiz.traverse(o => { if (o.name === 'lamina' && o.visible) n++; }); return n"))
-    vr(pg, "t.camera.rotation.set(-0.35, 0, 0)"); time.sleep(0.3); pg.screenshot(path=F + '06_sabre_pontas.png')
-    vr(pg, "await __vr.apertar('esq', 4);"); time.sleep(0.5)
-    print('sabre:', T(pg, 'return t.estado.sabre'))
-    pg.screenshot(path=F + '07_sabre_nos.png')
+    # sabre: X → mão direita → mão esquerda → desligado; dedos esticados e travados, lâminas de ~120 cm nas pontas
+    vr(pg, "await __vr.apertar('esq', 4); __vr.dedos(1, 1);"); time.sleep(0.5)
+    print('sabre:', T(pg, 'return t.estado.sabreMao'), '· lâminas visíveis (direita, esquerda):',
+          T(pg, "const n = (m) => { let k = 0; m.raiz.traverse(o => { if (o.name === 'lamina' && o.visible) k++; }); return k; }; return [n(t.maos.dir.pata), n(t.maos.esq.pata)]"),
+          '· comprimento no mundo (m):', T(pg, "const T = t.THREE; let l = null; t.maos.dir.pata.raiz.traverse(o => { if (o.name === 'lamina' && o.visible && !l) l = o; }); return +(new T.Box3().setFromObject(l).getSize(new T.Vector3()).length()).toFixed(2)"))
+    vr(pg, "t.camera.rotation.set(-0.3, 0, 0)"); time.sleep(0.3); pg.screenshot(path=F + '06_sabre_mao_direita.png')
+    vr(pg, "await __vr.apertar('esq', 4);"); time.sleep(0.4)
+    print('sabre:', T(pg, 'return t.estado.sabreMao'))
+    pg.screenshot(path=F + '07_sabre_mao_esquerda.png')
     vr(pg, "await __vr.apertar('esq', 4); __vr.dedos(0, 0); t.camera.rotation.set(-0.55, 0, 0);")
     # agulhas 6×: todas as garras brancas
     vr(pg, "await __vr.apertar('esq', 5); await __vr.apertar('esq', 5); __vr.dedos(0, 1);"); time.sleep(0.4)
@@ -67,7 +69,7 @@ with servidor(), sync_playwright() as p:
     vr(pg, "__vr.maos(); t.camera.rotation.set(-0.55, 0, 0);")
     # tamanho: analógico direito para cima = pata maior
     vr(pg, "const ax = t.entrada.maos.dir.fonte.gamepad.axes; ax[3] = -1; await new Promise(r => setTimeout(r, 150)); ax[3] = 0;"); time.sleep(0.3)
-    print('tamanho depois de empurrar para cima:', T(pg, 'return t.estado.tamanho'))
+    print('tamanho padrão 1,3; depois de empurrar para cima:', T(pg, 'return t.estado.tamanho'))
     # modo humano: A
     vr(pg, "await __vr.apertar('dir', 4);"); time.sleep(0.5)
     print('personagem:', T(pg, 'return t.estado.personagem'), '· escala do mundo:', T(pg, 'return +t.rig.scale.x.toFixed(3)'))

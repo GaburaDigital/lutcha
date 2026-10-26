@@ -10,7 +10,6 @@ import * as THREE from 'three';
 
 export type Personagem = 'urso' | 'humano';
 export type CorPelo = 'normal' | 'berserker' | 'dourado';
-export type Sabre = 'desligado' | 'pontas' | 'nos';
 
 export const CORES = {
   normal: '#733634', berserker: '#b22626', dourado: '#f9f76b',
@@ -31,7 +30,7 @@ export const PATA = {
   // punho e antebraço: [largura, altura, comprimento, z do centro]
   braco: [[0.17, 0.085, 0.07, 0.03], [0.18, 0.10, 0.18, 0.155], [0.20, 0.115, 0.18, 0.338]] as [number, number, number, number][],
   relogioZ: 0.19,          // um pouco acima do meio do antebraço (rodada 2)
-  laminaComprimento: 0.8,  // sabre laser: ~80 cm no mundo, qualquer que seja o tamanho da pata
+  laminaComprimento: 1.2,  // sabre laser: ~120 cm no mundo, qualquer que seja o tamanho da pata (rodada 3)
 };
 
 /** Mão do Gabura: mão de verdade (4 dedos separados, 3 segmentos), sem unhas e sem almofadas. */
@@ -54,7 +53,7 @@ export interface EstadoMao {
   agulhas: 0 | 3 | 6;
   furadeira: boolean;     // engatilhada: punho fechado e tornado no pulso
   carga: number;          // 0 a 1
-  sabre: Sabre;
+  sabre: boolean;         // sabre laser nesta mão (geralmente só em uma): lâminas nas pontas dos dedos
   tamanho: number;        // tamanho da pata no mundo (1,0× = medidas acima)
 }
 
@@ -160,7 +159,7 @@ function criarTornado(): { grupo: THREE.Group; atualizar: (carga: number, tempo:
   return { grupo, atualizar };
 }
 
-/** Lâmina do sabre laser: prisma de 4 lados afinando na ponta; miolo amarelo dentro da capa laranja translúcida. */
+/** Lâmina do sabre laser (~120 cm): prisma de 4 lados afinando na ponta; miolo amarelo dentro da capa laranja translúcida. */
 function criarLamina(mFora: THREE.Material, mMiolo: THREE.Material): THREE.Group {
   const g = new THREE.Group(); g.name = 'lamina';
   const fora = new THREE.CylinderGeometry(0.002, 0.014, 1, 4); fora.rotateX(-Math.PI / 2); fora.translate(0, 0, -0.5);
@@ -233,11 +232,6 @@ export function criarPata(lado: 1 | -1): Mao {
     juntas[nome] = [base, j];
   }
   dedo('frente', -lado * P.xDedos); dedo('meio', 0); dedo('fora', lado * P.xDedos);
-  // sabre "nos dedos" (estilo Wolverine): lâminas saindo das costas da mão, entre os nós, com o punho fechado
-  const laminasNos: THREE.Group[] = [];
-  for (const x of [-lado * P.xDedos, 0, lado * P.xDedos]) {
-    const l = criarLamina(mFora, mMiolo); l.position.set(x * 0.9, P.esp / 2 - 0.014, -P.palmaC + 0.03); l.visible = false; raiz.add(l); laminasNos.push(l);
-  }
 
   const pol = new THREE.Group(); pol.position.set(-lado * (P.palmaL / 2 - 0.004), -0.008, P.polZ); raiz.add(pol);
   const p1 = bloco(P.polSeg1, P.polEsp, P.polL, mPelo, 0.007); p1.position.x = -lado * P.polSeg1 / 2; pol.add(p1);
@@ -250,7 +244,7 @@ export function criarPata(lado: 1 | -1): Mao {
 
   if (lado < 0) relogio(ab.relogioPai, P.braco[1][0], P.braco[1][1], P.relogioZ, 0.04);
   const tornado = criarTornado(); tornado.grupo.visible = false; raiz.add(tornado.grupo);
-  const triangulos = contarTriangulos(raiz, [tornado.grupo, ...laminasPonta, ...laminasNos]);
+  const triangulos = contarTriangulos(raiz, [tornado.grupo, ...laminasPonta]);
 
   function posar(gat: number, grp: number): void { // mesmas curvas da luva da Nave
     const [fb, fj] = juntas.frente;
@@ -265,19 +259,19 @@ export function criarPata(lado: 1 | -1): Mao {
     raiz.position.set(0, 0, (P.palmaC / 2) * local); // o meio da palma fica no centro do grip, como na luva
     mPelo.color.set(CORES[e.cor]);
     // poses travadas: sabre e furadeira mandam nos dedos; gatilho e grip param de mexer
-    if (e.sabre === 'pontas') {
+    // sabre: dedos esticados e travados, lâminas saindo das pontas (rodada 3: opção A)
+    if (e.sabre) {
       posar(0, 0); for (const [b, j] of Object.values(juntas)) { b.rotation.x = 0; j.rotation.x = 0; }
-    } else if (e.sabre === 'nos' || e.furadeira) posar(1, 1);
+    } else if (e.furadeira) posar(1, 1);
     else posar(gatilho, grip);
     for (const g of garras) {
-      g.malha.visible = e.sabre !== 'pontas';
+      g.malha.visible = !e.sabre;
       g.malha.material = e.agulhas === 6 || (e.agulhas === 3 && g.frente) ? mBrilho : mGarra;
     }
-    const compr = P.laminaComprimento / e.tamanho; // ~80 cm no mundo
-    for (const l of laminasPonta) { l.visible = e.sabre === 'pontas'; l.scale.set(1, 1, compr); }
-    for (const l of laminasNos) { l.visible = e.sabre === 'nos'; l.scale.set(1, 1, compr); }
+    const compr = P.laminaComprimento / e.tamanho; // ~120 cm no mundo
+    for (const l of laminasPonta) { l.visible = e.sabre; l.scale.set(1, 1, compr); }
     mFora.opacity = 0.7 + 0.12 * Math.sin(tempo * 23) * Math.sin(tempo * 7); // brasa tremendo
-    tornado.grupo.visible = e.furadeira && e.sabre === 'desligado';
+    tornado.grupo.visible = e.furadeira && !e.sabre;
     if (tornado.grupo.visible) tornado.atualizar(e.carga, tempo, dt);
   }
   return { personagem: 'urso', lado, suporte, raiz, triangulos, atualizar, apontarAntebraco: ab.apontar };
