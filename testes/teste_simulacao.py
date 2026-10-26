@@ -8,9 +8,9 @@ from base import *
 AJUDA = """
 window.__s = {
   nova(op = {}) { this.l = new __lab.Luta(Object.assign({ semIA: true, clonesIniciais: 4, semente: 7 }, op)); this.ev = []; return this.l.testeNumeros(); },
-  urso(cab, esq, dir, ge = [0, 0], gd = [0, 0]) {
+  urso(cab, esq, dir, ge = [0, 0], gd = [0, 0], giro = 0) {
     const v = (a) => ({ x: a[0], y: a[1], z: a[2] });
-    this.l.definirUrso({ cabeca: v(cab), tamanhoPata: 1.3, maos: { esq: { pos: v(esq), gatilho: ge[0], grip: ge[1] }, dir: { pos: v(dir), gatilho: gd[0], grip: gd[1] } } });
+    this.l.definirUrso({ cabeca: v(cab), giro, tamanhoPata: 1.3, maos: { esq: { pos: v(esq), gatilho: ge[0], grip: ge[1] }, dir: { pos: v(dir), gatilho: gd[0], grip: gd[1] } } });
   },
   passos(n, fn) { for (let i = 0; i < n; i++) { if (fn) fn(i); this.l.avancar(1 / 60); this.ev.push(...this.l.tirarEventos()); } return this.ev; },
   clone() { const o = this.l.numeroDoOriginal(); return this.l.testeNumeros().filter((n) => n !== o); },
@@ -68,9 +68,9 @@ with servidor(), sync_playwright() as p:
 
     # 6) ataques combinados: três impactos juntos no urso
     r = S(pg, """s.nova({ clonesIniciais: 2 }); const ns = s.l.testeNumeros();
-      ns.forEach((n, i) => { const a = i * 2.1; s.l.testeColocar(n, { x: Math.cos(a) * 0.9, y: 0.47, z: Math.sin(a) * 0.9 }); });
+      ns.forEach((n, i) => { const a = i * 2.1; s.l.testeColocar(n, { x: Math.cos(a) * 0.7, y: 0.47, z: 0.15 + Math.sin(a) * 0.7 }); }); // em volta das pernas
       s.passos(3, () => s.urso([0, 2.45, 0], [-0.4, 1.2, -0.4], [0.4, 1.2, -0.4]));
-      ns.forEach((n) => s.l.testePedirAtaque(n, 'impacto'));
+      ns.forEach((n) => s.l.testePedirAtaque(n, 'soco'));
       const ev = s.passos(2, () => s.urso([0, 2.45, 0], [-0.4, 1.2, -0.4], [0.4, 1.2, -0.4]));
       return ev.filter((e) => e.tipo === 'ursoGolpeado').map((e) => e.combo);""")
     confere('ataque combinado de três Piranbenjas', r == [1, 1.6, 2.2], r)
@@ -82,8 +82,8 @@ with servidor(), sync_playwright() as p:
       const antes = s.l.testeNumeros(); s.l.testeCriarClones(2); const depois = s.l.testeNumeros();
       const repetidos = antes.filter((n) => depois.includes(n)).length;
       return { chaves, bytes: bin.byteLength, n: f.piranbenjas.length, iguais: JSON.stringify(volta.piranbenjas.map(p => p.numero)) === JSON.stringify(f.piranbenjas.map(p => p.numero)), repetidos, total: depois.length };""")
-    confere('foto sem marca do original', r['chaves'] == ['achatado', 'agarrado', 'ataque', 'estado', 'numero', 'partes', 'pos', 'rot', 'voando'], r['chaves'])
-    confere('foto binária: 19 + 17 bytes por Piranbenja', r['bytes'] == 19 + 17 * r['n'] and r['iguais'], r['bytes'])
+    confere('foto sem marca do original', r['chaves'] == ['achatado', 'agarrado', 'ataque', 'estado', 'grudado', 'numero', 'partes', 'pos', 'rot', 'voando'], r['chaves'])
+    confere('foto binária: 19 + 18 bytes por Piranbenja', r['bytes'] == 19 + 18 * r['n'] and r['iguais'], r['bytes'])
     confere('números sorteados de novo ao criar clones', r['repetidos'] <= 1 and r['total'] == 6, r)
 
     # ---------- rodada 2 do urso ----------
@@ -148,6 +148,60 @@ with servidor(), sync_playwright() as p:
     # 16) braço que estica: abaixo do ombro desce 1,6× mais (meio da coxa alcança o chão no urso)
     r = pg.evaluate('() => { const R = __lab.regras; return [R.esticarAltura(1.5, 1.35, 1.6), R.esticarAltura(0.5, 1.35, 1.6)].map((v) => +v.toFixed(2)); }')
     confere('braço estica para baixo', r == [1.5, -0.01], r)
+
+    # ---------- teste solo do Piranbenja (C16) ----------
+    # 17) o Piranbenja acerta a parte do urso que alcança: tapa perto da perna esquerda
+    r = S(pg, """s.nova({ clonesIniciais: 1 }); const [c] = s.clone(); s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 });
+      s.l.testeColocar(c, { x: -0.55, y: 0.47, z: 1.9 }); s.passos(5, () => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], [0.6, 1.4, 1.7]));
+      s.l.testePedirAtaque(c, 'tapa'); const ev = s.passos(2, () => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], [0.6, 1.4, 1.7]));
+      return ev.filter((e) => e.tipo === 'ursoGolpeado').map((e) => [e.ataque, e.parte]);""")
+    confere('tapa na perna do urso', r == [['tapa', 'pernaE']], r)
+    # 18) mordida gruda no braço, acompanha o braço subindo e solta quando o urso sacode
+    r = S(pg, """s.nova({ clonesIniciais: 1 }); const [c] = s.clone(); s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 });
+      s.l.testeColocar(c, { x: 0.35, y: 0.47, z: 0.3 }); const pata = [0.35, 0.75, 0.8];
+      s.passos(10, () => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], pata));
+      s.l.testePedirAtaque(c, 'morder'); s.passos(2, () => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], pata));
+      const gr = s.l.testeGrudados();
+      s.passos(60, (i) => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], [0.35, 0.75 + i * 0.015, 0.8]));
+      const p1 = s.l.foto().piranbenjas.find((p) => p.numero === c);
+      const ev = s.passos(40, (i) => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], [0.35 + (i % 2 ? 0.45 : -0.45), 1.65, 0.8]));
+      return { gr, cab: p1.partes && +p1.partes.cabeca.pos.y.toFixed(2), grudado: p1.grudado, soltou: ev.filter((e) => e.tipo === 'soltouGrudado').map((e) => e.como), depois: s.l.testeGrudados().length, res: s.l.foto().urso.res };""")
+    confere('mordida gruda no braço e sobe com ele', len(r['gr']) == 1 and r['gr'][0]['parte'] in ('antebracoD', 'pataD') and r['grudado'] and r['cab'] > 1.1, r)
+    confere('sacudir o braço solta o grudado', 'sacudida' in r['soltou'] and r['depois'] == 0, r)
+    # 19) arrancar com a outra pata: agarra o grudado e ele sai do braço
+    r = S(pg, """s.nova({ clonesIniciais: 1 }); const [c] = s.clone(); s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 });
+      s.l.testeColocar(c, { x: 0.35, y: 0.47, z: 0.3 }); const pata = [0.35, 0.75, 0.8];
+      s.passos(10, () => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], pata));
+      s.l.testePedirAtaque(c, 'morder'); s.passos(3, () => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], pata));
+      const cab = s.l.foto().piranbenjas.find((p) => p.numero === c).partes.tronco.pos;
+      s.passos(20, () => s.urso([0, 2.45, 2], [cab.x, cab.y + 0.05, cab.z], pata));
+      s.passos(10, () => s.urso([0, 2.45, 2], [cab.x, cab.y + 0.05, cab.z], pata, [0, 1]));
+      return { ev: s.ev.filter((e) => e.tipo === 'soltouGrudado' || e.tipo === 'agarrou').map((e) => e.tipo + ':' + (e.como || e.mao)), grudados: s.l.testeGrudados().length };""")
+    confere('arrancar o grudado com a outra pata', 'soltouGrudado:arrancado' in r['ev'] and 'agarrou:esq' in r['ev'] and r['grudados'] == 0, r)
+    # 20) o original nunca morde: pedir mordida vira tapa, e ele não gruda
+    r = S(pg, """s.nova({ clonesIniciais: 0 }); const o = s.l.numeroDoOriginal();
+      s.l.testeColocar(o, { x: -0.55, y: 0.47, z: 1.9 }); s.passos(5, () => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], [0.6, 1.4, 1.7]));
+      s.l.controle.atacar = 'tapa'; s.l.controle.olhar = -Math.PI / 2;
+      const ev = s.passos(60, () => s.urso([0, 2.45, 2], [-0.6, 1.4, 1.7], [0.6, 1.4, 1.7]));
+      return { ataques: ev.filter((e) => e.tipo === 'ursoGolpeado').map((e) => e.ataque), grudados: s.l.testeGrudados().length };""")
+    confere('o original dá tapa (não morde nem gruda)', r['ataques'] == ['tapa'] and r['grudados'] == 0, r)
+    # 21) urso ofensivo contra clones: bate, agarra e arremessa; e ninguém fica dentro do urso
+    r = S(pg, """s.nova({ semIA: false, ursoBot: 'ofensivo', clonesIniciais: 6, comportamento: 'ofensivos', semente: 11 });
+      let pior = 0, acima = 0; const tipos = {};
+      for (let i = 0; i < 1500; i++) { s.l.avancar(1 / 60); for (const e of s.l.tirarEventos()) tipos[e.tipo] = (tipos[e.tipo] || 0) + 1; const m = s.l.testeSobreposicao(); pior = Math.max(pior, m); if (m > 0.03) acima++; }
+      return { tipos, pior: +pior.toFixed(3), acima };""")
+    t = r['tipos']
+    confere('urso ofensivo bate, agarra e arremessa', t.get('golpe', 0) >= 3 and t.get('agarrou', 0) >= 1 and t.get('arremessou', 0) >= 1, t)
+    # boneco solto balançando pode encostar até ~8 cm por um quadro (a junta puxa, o empurrão devolve); fora isso, até 3 cm
+    confere('ninguém fica dentro do urso', r['pior'] <= 0.08 and r['acima'] <= 15, {'pior': r['pior'], 'quadros acima de 3 cm': r['acima']})
+    # 22) urso parado não sai do lugar; urso bobo anda
+    r = S(pg, """const pos = (j) => { s.nova({ semIA: true, ursoBot: j }); s.passos(240); const c = s.l.entradaUrso.cabeca; return Math.hypot(c.x, c.z - 3); };
+      return { parado: +pos('parado').toFixed(2), bobo: +pos('bobo').toFixed(2) };""")
+    confere('urso parado fica; urso bobo anda', r['parado'] < 0.01 and r['bobo'] > 0.3, r)
+    # 23) clones simples custam menos água
+    r = S(pg, """s.nova({ clonesIniciais: 0 }); const a0 = s.l.aguaAtual; s.l.testeCriarClones(2, true); const a1 = s.l.aguaAtual; s.l.testeCriarClones(2, false);
+      return [Math.round(a0 - a1), Math.round(a1 - s.l.aguaAtual)];""")
+    confere('clone simples custa menos água', r == [16, 30], r)
 
     reais = [e for e in erros if 'GPU stall' not in e and 'WebGL' not in e]
     if reais: print('erros no console:', reais); erros_teste.append('console')

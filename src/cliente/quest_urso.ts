@@ -338,7 +338,9 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       }
     }
     if (ev.tipo === 'ursoGolpeado') {
-      vibrar('esq', ...VIBRACAO.levarGolpe); vibrar('dir', ...VIBRACAO.levarGolpe);
+      // mordida ou tapa no braço vibra mais forte naquela mão; no corpo, nas duas
+      const lado: Lado | null = ev.parte && /E$/.test(ev.parte) && ev.parte !== 'cabeca' ? 'esq' : ev.parte && /D$/.test(ev.parte) && !ev.parte.startsWith('perna') ? 'dir' : null;
+      if (lado) vibrar(lado, 1, 160); else { vibrar('esq', ...VIBRACAO.levarGolpe); vibrar('dir', ...VIBRACAO.levarGolpe); }
       empurrao.x += ev.empurrao.x; empurrao.z += ev.empurrao.z;
       const c = camera.getWorldPosition(new THREE.Vector3());
       if (ev.combo > 1) onos.mostrar('KA-POW!', { x: c.x, y: c.y - 0.4, z: c.z - 1.2 }, '#4fd6d0', 0.4);
@@ -357,7 +359,10 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   function entradaDoUrso(): EntradaUrso {
     const c = camera.getWorldPosition(new THREE.Vector3());
     const mao = (l: Lado) => { const p = posPata(l); return { pos: { x: p.x, y: p.y, z: p.z }, gatilho: entrada.maos[l].gatilhoValor, grip: entrada.maos[l].gripValor }; };
-    return { cabeca: { x: c.x, y: c.y, z: c.z }, maos: { esq: mao('esq'), dir: mao('dir') }, tamanhoPata: estadoPata.tamanho };
+    // giro: para onde a cabeça olha (no chão), para a luta saber onde ficam os ombros e o corpo
+    const fr = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+    const giro = Math.atan2(-fr.x, -fr.z);
+    return { cabeca: { x: c.x, y: c.y, z: c.z }, giro, maos: { esq: mao('esq'), dir: mao('dir') }, tamanhoPata: estadoPata.tamanho };
   }
   function fotoInterpolada(agora: number): Foto | null {
     if (!fotos.length) return null;
@@ -385,7 +390,8 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
         if (a.lengthSq() > 0.01) {
           const fr = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion())); fr.y = 0; fr.normalize();
           const la = new THREE.Vector3(-fr.z, 0, fr.x);
-          rig.position.addScaledVector(fr.multiplyScalar(-a.y).add(la.multiplyScalar(a.x)), 1.4 * rig.scale.x * dt);
+          const lento = 1 - Math.min(0.6, (ultimaFoto?.urso.grudados ?? 0) * 0.05); // cada clone grudado: 5% mais lento (D-083)
+          rig.position.addScaledVector(fr.multiplyScalar(-a.y).add(la.multiplyScalar(a.x)), 1.4 * rig.scale.x * dt * lento);
         }
         const d = entrada.maos.dir.analogico;
         if (Math.abs(d.x) < 0.3) giroArmado = true;

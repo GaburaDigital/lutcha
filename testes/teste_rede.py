@@ -46,7 +46,7 @@ with servidor(), sync_playwright() as p:
     cab_pc = J(pc, 'const c = t.luta.entradaUrso.cabeca; return [c.x, c.y, c.z].map(v => +v.toFixed(2))')
     confere('cabeça do urso chegando ao PC', all(abs(a - b) < 0.05 for a, b in zip(cab_q, cab_pc)), f'Quest {cab_q} · PC {cab_pc}')
     chaves = J(quest, "return [...new Set(t.fotos.at(-1).f.piranbenjas.flatMap(p => Object.keys(p)))].sort()")
-    confere('o Quest não recebe quem é o original', chaves == ['achatado', 'agarrado', 'ataque', 'estado', 'numero', 'partes', 'pos', 'rot', 'voando'], chaves)
+    confere('o Quest não recebe quem é o original', chaves == ['achatado', 'agarrado', 'ataque', 'estado', 'grudado', 'numero', 'partes', 'pos', 'rot', 'voando'], chaves)
     # números sorteados de novo quando o PC cria clones (tecla C)
     antes = J(quest, 'return t.fotos.at(-1).f.piranbenjas.map(p => p.numero)')
     pc.bring_to_front(); pc.keyboard.press('c'); time.sleep(1.5)

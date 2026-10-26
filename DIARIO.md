@@ -19,3 +19,9 @@ Primeira luta de verdade, ainda com formas simples. O Piranbenja anda pelo ringu
 Depois do primeiro teste no Quest, o urso ganhou golpes diferentes conforme a mão e o movimento: soco para frente, soco de lado que faz rolar, gancho que joga para cima girando, martelada que achata no chão, arranhão largo e estocada. Os clones colados levam o golpe "de tabela", ficam tontos com estrelinhas e avisam antes de atacar. Agarrar um Piranbenja agora faz ele balançar solto, preso só pela parte que a pata segura. E o braço do urso estica para baixo, para alcançar os pequenos sem precisar se agachar.
 
 ![Teste do urso: soco na pirâmide de clones e um clone armando a mordida](docs/diario/2026-10-26_rodada2_urso.png)
+
+## 26/10/2026 — O Piranbenja entra na luta (teste no PC)
+
+Agora dá para jogar de Piranbenja sozinho no computador, contra um UrsoBura controlado pelo jogo: ele pode ficar parado como boneco de treino, andar meio bobo ou partir para cima, batendo, agarrando e arremessando. O urso ganhou corpo inteiro, com braços de verdade ligados aos ombros, e ninguém atravessa ninguém. O Piranbenja dá tapas e socos; os clones também mordem, e quem morde fica grudado no braço do urso, balançando junto, até ser sacudido ou arrancado. E a mochila do Piranbenja voltou para as costas.
+
+![Teste do Piranbenja no PC: o urso de corpo inteiro e um clone grudado](docs/diario/2026-10-26_piranbenja_pc.png)

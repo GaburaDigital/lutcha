@@ -16,6 +16,7 @@ Acompanhe o desenvolvimento no [DIARIO.md](DIARIO.md).
 
 | Opção | Onde | O que faz |
 | --- | --- | --- |
+| **Piranbenja solo (PC)** | computador | Sem internet: você contra o urso do jogo (parado, bobo ou ofensivo). Esc abre as opções. |
 | **Piranbenja (PC)** | computador | Cria a sala e mostra o código de 5 letras. Enquanto o urso não entra, luta contra um urso de treino. |
 | **UrsoBura (Quest)** | Meta Quest | Digite o código da sala, aperte **Conectar** e depois **Entrar no VR**. |
 | **Solo contra os clones** | Meta Quest | Luta sem internet: o original e os clones são controlados pelo jogo. |
@@ -25,7 +26,7 @@ O PC e o Quest precisam estar **no mesmo Wi-Fi**. A internet só é usada para o
 
 ### Controles do protótipo
 
-**PC (Piranbenja):** W A S D anda · clique na tela e mova o mouse para girar · **J** ataque de dano · **K** ataque de impacto · **C** cria 2 clones (gasta água) · Esc solta o mouse. O anel no chão marca o original (só o PC vê).
+**PC (Piranbenja):** W A S D anda · clique na tela para prender o mouse e girar a câmera (Alt solta) · clique esquerdo dá **tapa** · clique direito dá **soco** · segure **Q** para clones simples ou **E** para clones complexos (quanto mais tempo, mais clones) · Esc pausa no solo. O anel no chão marca o original (só o PC vê). A faixa de teclas embaixo da tela acende quando você aperta.
 
 **Quest (UrsoBura):** mova os braços para bater. Punho fechado (gatilho + grip) é **soco**: para frente empurra, de lado faz rolar, para cima é gancho e para baixo é martelada. Mão aberta é **arranhão** (de lado) ou **estocada** (reta para frente). Feche a mão devagar perto de um Piranbenja para **agarrar** e solte no meio do movimento para **arremessar**. Abaixo do ombro, o braço do urso estica para alcançar o chão. Analógico esquerdo anda, analógico direito gira 30°. Para ver resistência, aura e placar, olhe para o relógio no pulso esquerdo.
 
