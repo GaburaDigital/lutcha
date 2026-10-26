@@ -90,7 +90,7 @@ with servidor(), sync_playwright() as p:
     PREP = """s.nova(); const [c, d] = s.clone(); s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 });
       s.l.testeColocar(c, { x: 0, y: 0.47, z: 0 }); s.l.testeColocar(d, { x: -4, y: 0.47, z: 3 }); s.passos(10);"""
     # 8) gancho: punho subindo por baixo do clone: sobe girando para trás (cabeça para longe do urso, giro em −x)
-    r = S(pg, PREP + """const ev = s.passos(20, (i) => s.urso([0, 2.45, 1.2], [-1, 1.2, 2], [0, 0.1 + i * 7 / 60, 0.6 - i * 1.5 / 60], [0, 0], [1, 1]));
+    r = S(pg, PREP + """const ev = s.passos(20, (i) => s.urso([0, 2.45, 1.2], [-1, 1.2, 2], [0, 0.1 + i * 7 / 60, 0.75 - i * 4 / 60], [0, 0], [1, 1]));
       s.passos(4); const g = ev.find((e) => e.tipo === 'golpe'); return { g, giro: s.l.testeGiro(c), vel: s.l.testeVelocidade(c), est: s.l.testeEstado(c) };""")
     confere('gancho: sobe girando para trás', (r['g'] or {}).get('nome') == 'gancho' and r['giro']['x'] < -2, {'nome': (r['g'] or {}).get('nome'), 'giro': r['giro']})
     # 9) soco lateral: o clone rola de lado
@@ -188,11 +188,12 @@ with servidor(), sync_playwright() as p:
     # 21) urso ofensivo contra clones: bate, agarra e arremessa; e ninguém fica dentro do urso
     r = S(pg, """s.nova({ semIA: false, ursoBot: 'ofensivo', clonesIniciais: 6, comportamento: 'ofensivos', semente: 11 });
       let pior = 0, acima = 0; const tipos = {};
-      for (let i = 0; i < 1500; i++) { s.l.avancar(1 / 60); for (const e of s.l.tirarEventos()) tipos[e.tipo] = (tipos[e.tipo] || 0) + 1; const m = s.l.testeSobreposicao(); pior = Math.max(pior, m); if (m > 0.03) acima++; }
+      for (let i = 0; i < 2400; i++) { s.l.avancar(1 / 60); for (const e of s.l.tirarEventos()) tipos[e.tipo] = (tipos[e.tipo] || 0) + 1; const m = s.l.testeSobreposicao(); if (m > 0.03) acima++; pior = Math.max(pior, s.l.testeSobreposicao(true)); }
       return { tipos, pior: +pior.toFixed(3), acima };""")
     t = r['tipos']
     confere('urso ofensivo bate, agarra e arremessa', t.get('golpe', 0) >= 3 and t.get('agarrou', 0) >= 1 and t.get('arremessou', 0) >= 1, t)
-    # boneco solto balançando pode encostar até ~8 cm por um quadro (a junta puxa, o empurrão devolve); fora isso, até 3 cm
+    # boneco solto balançando pode encostar até ~8 cm por um quadro (a junta puxa, o empurrão devolve); fora isso, até 3 cm.
+    # O Piranbenja segurado durante um arremesso rápido (9 m/s) pode passar mais por um quadro: conta só nos quadros acima de 3 cm
     confere('ninguém fica dentro do urso', r['pior'] <= 0.08 and r['acima'] <= 15, {'pior': r['pior'], 'quadros acima de 3 cm': r['acima']})
     # 22) urso parado não sai do lugar; urso bobo anda
     r = S(pg, """const pos = (j) => { s.nova({ semIA: true, ursoBot: j }); s.passos(240); const c = s.l.entradaUrso.cabeca; return Math.hypot(c.x, c.z - 3); };
@@ -201,7 +202,41 @@ with servidor(), sync_playwright() as p:
     # 23) clones simples custam menos água
     r = S(pg, """s.nova({ clonesIniciais: 0 }); const a0 = s.l.aguaAtual; s.l.testeCriarClones(2, true); const a1 = s.l.aguaAtual; s.l.testeCriarClones(2, false);
       return [Math.round(a0 - a1), Math.round(a1 - s.l.aguaAtual)];""")
-    confere('clone simples custa menos água', r == [16, 30], r)
+    confere('clone simples custa menos água', r == [12, 30], r)
+
+    # ---------- equilíbrio e correções (C19) ----------
+    # 24) três socos juntos no urso cansado: ele decola, voa e cai
+    r = S(pg, """s.nova({ semIA: true, ursoBot: 'parado', clonesIniciais: 3 }); s.passos(30);
+      s.l.ursoRes = 30; const ns = s.l.testeNumeros();
+      ns.forEach((n, i) => { const a = i * 2.1; s.l.testeColocar(n, { x: Math.cos(a) * 0.7, y: 0.47, z: 3.15 + Math.sin(a) * 0.7 }); });
+      s.passos(3); ns.forEach((n) => s.l.testePedirAtaque(n, 'soco'));
+      let alto = 0; const ev = s.passos(200, () => { alto = Math.max(alto, s.l.entradaUrso.cabeca.y); });
+      return { decolou: ev.filter((e) => e.tipo === 'ursoDecolou').length, alto: +alto.toFixed(2), fim: +s.l.entradaUrso.cabeca.y.toFixed(2) };""")
+    confere('soco combinado decola o urso cansado', r['decolou'] == 1 and r['alto'] > 3.4 and r['fim'] < 2.6, r)
+    # 25) ao criar clones, o original passa as estrelinhas para um clone novo e fica livre
+    r = S(pg, """s.nova({ clonesIniciais: 0 }); s.passos(5); const o = s.l.pbs.find((p) => p.original); o.atordoadoAte = s.l.tempo + 3; o.estado = 'atordoado';
+      s.l.testeCriarClones(2); const tontos = s.l.foto().piranbenjas.filter((p) => s.l.testeEstado(p.numero).atordoadoPor > 1);
+      return { originalLivre: s.l.testeEstado(s.l.numeroDoOriginal()).atordoadoPor === 0, tontos: tontos.length, tontoEhOriginal: tontos.some((p) => p.numero === s.l.numeroDoOriginal()) };""")
+    confere('estrelinhas passam do original para um clone', r['originalLivre'] and r['tontos'] == 1 and not r['tontoEhOriginal'], r)
+    # 26) clone salva-vidas: caindo do ringue, criar clones devolve o original; de novo só depois de 8 s
+    r = S(pg, """s.nova({ clonesIniciais: 0 }); const o = s.l.numeroDoOriginal();
+      const cair = () => { s.l.testeColocar(s.l.numeroDoOriginal(), { x: 0, y: 0.47, z: 6.3 }); s.l.pbs.find((p) => p.original).corpo.setLinvel({ x: 0, y: 0, z: 3 }, true); s.passos(25); };
+      cair(); const y0 = s.l.foto().piranbenjas.find((p) => p.numero === s.l.numeroDoOriginal()).pos.y;
+      s.l.testeCriarClones(2); s.passos(10); const p1 = s.l.foto().piranbenjas.find((p) => p.numero === s.l.numeroDoOriginal()).pos;
+      cair(); s.l.testeCriarClones(2); const ev = s.passos(90);
+      return { caindo: +y0.toFixed(2), salvo: Math.hypot(p1.x, p1.z) < 5.6 && p1.y > 0.2, depois: ev.filter((e) => e.tipo === 'fimRodada').map((e) => e.vencedor) };""")
+    confere('clone salva-vidas (e espera de 8 s)', r['caindo'] < 0.4 and r['salvo'] and r['depois'] == ['urso'], r)
+    # 27) um em cada três clones simples vira armadilha de morder
+    r = S(pg, """s.nova({ clonesIniciais: 0 }); s.l.testeCriarClones(6, true); return s.l.pbs.filter((p) => p.armadilha).length;""")
+    confere('armadilhas de morder entre os clones simples', r == 2, r)
+    # 28) pata devagar não golpeia (só encosta) e agarra
+    r = S(pg, """s.nova(); const [c] = s.clone(); s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 });
+      s.l.testeColocar(c, { x: 0, y: 0.47, z: 0 }); s.passos(10);
+      const ev = s.passos(40, (i) => s.urso([0, 2.45, 2], [-1, 1.2, 2], [0, 0.55, Math.max(0.45, 1.2 - i * 2.5 / 60)], [0, 0], [0, 0]));
+      const golpes = ev.filter((e) => e.tipo === 'golpe').length;
+      const ev2 = s.passos(10, () => s.urso([0, 2.45, 2], [-1, 1.2, 2], [0, 0.55, 0.45], [0, 0], [0, 1]));
+      return { golpes, agarrou: ev2.some((e) => e.tipo === 'agarrou') };""")
+    confere('pata devagar não golpeia e agarra', r['golpes'] == 0 and r['agarrou'], r)
 
     reais = [e for e in erros if 'GPU stall' not in e and 'WebGL' not in e]
     if reais: print('erros no console:', reais); erros_teste.append('console')

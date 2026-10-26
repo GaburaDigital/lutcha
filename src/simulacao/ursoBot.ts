@@ -29,27 +29,44 @@ export class UrsoBot {
   private esperaAte = 0;
   private alvoAndar: V3 | null = null;
   private tempo = 0;
+  private empurrao = v(0, 0, 0);       // escorrega depois de levar soco
+  private voo: V3 | null = null;       // velocidade enquanto voa (decolou)
+  private altura = 0;                  // quanto está acima do chão (ou abaixo, se caiu fora do ringue)
 
   constructor(public jeito: JeitoUrso, private aleatorio: () => number) {
     this.maos = { esq: { pos: this.descanso('esq', 0), gatilho: 0, grip: 0 }, dir: { pos: this.descanso('dir', 0), gatilho: 0, grip: 0 } };
   }
 
-  reiniciar(): void { this.x = 0; this.z = 3; this.giro = 0; this.plano = null; this.esperaAte = this.tempo + 1; this.alvoAndar = null; }
+  reiniciar(): void { this.x = 0; this.z = 3; this.giro = 0; this.plano = null; this.esperaAte = this.tempo + 1; this.alvoAndar = null; this.voo = null; this.altura = 0; this.empurrao = v(0, 0, 0); }
+
+  /** Levou soco: escorrega um pouco (perde força aos poucos). */
+  empurrar(vx: number, vz: number): void { this.empurrao = soma(this.empurrao, v(vx, 0, vz)); }
+  /** Decolou: voa em arco; no ar não ataca; se cair fora do ringue, continua caindo. */
+  decolar(vel: V3): void { this.voo = { ...vel }; this.plano = null; }
+  get noAr(): boolean { return !!this.voo; }
 
   /** Onde a pata descansa: na frente da barriga, um pouco para o lado, balançando com a respiração. */
   private descanso(l: Lado, t: number): V3 {
     const { frente, direita } = eixosDoGiro(this.giro), lado = l === 'esq' ? -1 : 1;
-    const resp = Math.sin(t * 2 + (lado > 0 ? 0.6 : 0)) * 0.03;
-    return soma(soma(v(this.x, 1.15 + resp, this.z), vezes(direita, 0.62 * lado)), vezes(frente, 0.25));
+    const resp = Math.sin(t * 2 + (lado > 0 ? 0.6 : 0)) * 0.03 + (this.voo ? 0.9 : 0); // no ar, braços para cima
+    return soma(soma(v(this.x, 1.15 + resp + this.altura, this.z), vezes(direita, 0.62 * lado)), vezes(frente, 0.25));
   }
 
   passo(dt: number, tempo: number, visao: VisaoDoBot): SaidaBot {
     this.tempo = tempo;
     const veloz = 1 - Math.min(0.6, visao.lentidao);
-    if (this.jeito !== 'parado') this.decidir(visao, veloz, dt);
+    // escorregar e voar valem para todos os jeitos (até o parado é empurrado)
+    this.x += this.empurrao.x * dt; this.z += this.empurrao.z * dt;
+    this.empurrao = vezes(this.empurrao, Math.exp(-2.5 * dt));
+    if (this.voo) {
+      this.x += this.voo.x * dt; this.z += this.voo.z * dt; this.altura += this.voo.y * dt; this.voo.y -= 9.81 * dt;
+      const dentro = Math.hypot(this.x, this.z) <= RINGUE.raio;
+      if (this.altura <= 0 && dentro) { this.altura = 0; this.voo = null; this.esperaAte = tempo + 0.8; }
+      else if (!dentro && this.altura < -6) this.voo.y = 0; // já caiu bem fora: para de calcular
+    } else if (this.jeito !== 'parado') this.decidir(visao, veloz, dt);
     this.moverMaos(dt, visao);
     const bob = this.jeito === 'parado' ? 0 : Math.sin(tempo * 5) * 0.015;
-    return { cabeca: v(this.x, 2.45 + bob, this.z), giro: this.giro, maos: { esq: { ...this.maos.esq, pos: { ...this.maos.esq.pos } }, dir: { ...this.maos.dir, pos: { ...this.maos.dir.pos } } }, tamanhoPata: 1.3 };
+    return { cabeca: v(this.x, 2.45 + bob + this.altura, this.z), giro: this.giro, maos: { esq: { ...this.maos.esq, pos: { ...this.maos.esq.pos } }, dir: { ...this.maos.dir, pos: { ...this.maos.dir.pos } } }, tamanhoPata: 1.3 };
   }
 
   private virarPara(p: V3, dt: number, rapidez = 2.5): number {
@@ -96,11 +113,11 @@ export class UrsoBot {
     if (!perto[0]) return;
     const alvo = perto[0].p;
     const erro = this.virarPara(alvo.pos, dt, 2.5);
-    if (perto[0].d > 1.25) { this.andarPara(alvo.pos, 1.1 * veloz, dt, 1.15); return; }
+    if (perto[0].d > 1.25) { this.andarPara(alvo.pos, 0.9 * veloz, dt, 1.15); return; }
     if (this.tempo < this.esperaAte || erro > 0.5) return;
     this.esperaAte = this.tempo + 0.5 + this.aleatorio() * 0.7;
     const r = this.aleatorio();
-    const acao: Acao = r < 0.22 ? 'agarrar' : r < 0.4 ? 'soco' : r < 0.52 ? 'socoLateral' : r < 0.64 ? 'gancho' : r < 0.74 ? 'martelada' : r < 0.88 ? 'arranhao' : 'estocada';
+    const acao: Acao = r < 0.3 ? 'agarrar' : r < 0.46 ? 'soco' : r < 0.57 ? 'socoLateral' : r < 0.68 ? 'gancho' : r < 0.77 ? 'martelada' : r < 0.9 ? 'arranhao' : 'estocada';
     if (acao === 'agarrar') this.agarrar(alvo, this.aleatorio() < 0.5 ? 'esq' : 'dir', false);
     else this.golpe(acao, alvo, 8, 0.1);
   }

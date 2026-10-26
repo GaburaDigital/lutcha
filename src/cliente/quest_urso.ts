@@ -11,8 +11,9 @@ import * as THREE from 'three';
 import { entrada, ligarControlesVR, lerVR, vibrar, type Lado } from '../xr/entrada';
 import { criarPata, type EstadoMao, type Mao } from '../xr/patas';
 import { Luta, prepararFisica, type Comportamento, type EntradaUrso, type Evento, type Formacao, type Foto } from '../simulacao/luta';
-import { GOLPES, OMBRO_ABAIXO_DOS_OLHOS, PIRANBENJA, URSO, VIBRACAO, classificarGolpe, esticarAltura, gerarBlocos, qualidadeDoGolpe } from '../simulacao/regras';
+import { EQUILIBRIO, GOLPES, OMBRO_ABAIXO_DOS_OLHOS, RINGUE, type V3, PIRANBENJA, URSO, VIBRACAO, classificarGolpe, esticarAltura, gerarBlocos, qualidadeDoGolpe } from '../simulacao/regras';
 import { codificarEntrada, decodificarFoto } from '../rede/protocolo';
+import { pertoEntreSegmentos } from '../simulacao/corpoUrso';
 import { abrirCanal, type Canal } from '../rede/canal';
 import { Onomatopeias, Piranbenjas, criarCena, criarRingue } from './visual';
 import { T } from '../textos';
@@ -20,13 +21,13 @@ import { T } from '../textos';
 export interface OpcoesQuest { modo: 'online' | 'solo'; tipoCanal: 'trystero' | 'local'; codigo?: string }
 
 /** Opções do solo de teste (ficam guardadas neste navegador). */
-export interface ConfigSolo { comportamento: Comportamento; quantidade: number; formacao: Formacao; cores: boolean; placas: boolean; esticar: number }
+export interface ConfigSolo { comportamento: Comportamento; quantidade: number; formacao: Formacao; cores: boolean; placas: boolean; esticar: number; decolagem: 'voar' | 'escurecer' }
 const COMPORTAMENTOS: Comportamento[] = ['parados', 'aleatorio', 'cautelosos', 'ofensivos'];
 const FORMACOES: Formacao[] = ['solto', 'torre', 'piramide', 'muralha', 'corrente'];
 const CHAVE_CONFIG = 'lutcha.soloTeste';
 
 function lerConfig(): ConfigSolo {
-  const c: ConfigSolo = { comportamento: 'cautelosos', quantidade: 6, formacao: 'solto', cores: true, placas: true, esticar: 1.6 };
+  const c: ConfigSolo = { comportamento: 'cautelosos', quantidade: 6, formacao: 'solto', cores: true, placas: true, esticar: 1.6, decolagem: 'voar' };
   try { Object.assign(c, JSON.parse(localStorage.getItem(CHAVE_CONFIG) ?? '{}')); } catch { /* sem armazenamento: usa o padrão */ }
   // a página também aceita as opções no endereço (testes automáticos e links prontos)
   const q = new URLSearchParams(location.search);
@@ -42,6 +43,7 @@ function lerConfig(): ConfigSolo {
   c.quantidade = Math.min(15, Math.max(1, Math.round(Number(c.quantidade) || 6)));
   c.esticar = Math.min(2.2, Math.max(1, Number(c.esticar) || 1.6));
   c.cores = c.cores !== false; c.placas = c.placas !== false;
+  if (c.decolagem !== 'escurecer') c.decolagem = 'voar'; // padrão: modo Insano, voa junto (C19)
   return c;
 }
 function guardarConfig(c: ConfigSolo): void { try { localStorage.setItem(CHAVE_CONFIG, JSON.stringify(c)); } catch { /* sem armazenamento */ } }
@@ -64,6 +66,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
         <label>${T.painel.formacao} <select id="cfgFormacao">${opcoesHtml(FORMACOES, T.formacoes, config.formacao)}</select></label>
         <label><input id="cfgCores" type="checkbox"${config.cores ? ' checked' : ''}> ${T.painel.cores}</label>
         <label><input id="cfgPlacas" type="checkbox"${config.placas ? ' checked' : ''}> ${T.painel.placas}</label>` : ''}
+        <label>${T.painel.decolagem} <select id="cfgDecolagem">${opcoesHtml(['voar', 'escurecer'], T.decolagens, config.decolagem)}</select></label>
         <label>${T.painel.esticar} <input id="cfgEsticar" type="range" min="1" max="2.2" step="0.1" value="${config.esticar}"> <b id="cfgEsticarValor">${config.esticar.toFixed(1)}×</b></label>
       </form>
     </div>`;
@@ -116,7 +119,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   const pt = new THREE.CanvasTexture(pc); pt.colorSpace = THREE.SRGBColorSpace;
   const painelPulso = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.1), new THREE.MeshBasicMaterial({ map: pt, transparent: true }));
   // nas costas do pulso esquerdo (no espaço do grip, as costas da mão esquerda ficam em −X): aparece quando você vira o pulso para olhar
-  painelPulso.position.set(-0.08, 0, 0.11); painelPulso.rotation.y = -Math.PI / 2; painelPulso.visible = false;
+  painelPulso.position.set(-0.08, 0, 0.11); painelPulso.rotation.set(0, -Math.PI / 2, Math.PI); painelPulso.visible = false; // C18: estava de cabeça para baixo
   alvoPata.esq.add(painelPulso);
   let acertos = 0;
   function desenharPulso(f: Foto | null): void {
@@ -194,6 +197,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     if (v('cfgCores')) config.cores = (v('cfgCores') as HTMLInputElement).checked;
     if (v('cfgPlacas')) config.placas = (v('cfgPlacas') as HTMLInputElement).checked;
     config.esticar = Number(v('cfgEsticar')!.value) || 1.6;
+    config.decolagem = (v('cfgDecolagem')!.value as ConfigSolo['decolagem']);
     valorEsticar.textContent = config.esticar.toFixed(1) + '×';
     guardarConfig(config);
     if (antes !== JSON.stringify([config.comportamento, config.formacao, config.quantidade])) aplicarConfigNaLuta(true);
@@ -212,7 +216,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   render.xr.addEventListener('sessionend', () => { entrada.modo = 'pc'; camera.position.set(0, 1.6, 0); });
 
   // ---------- pausa com opções (só no solo de teste): segurar Y por 1 s ----------
-  const linhas = ['comportamento', 'quantidade', 'formacao', 'cores', 'placas', 'esticar', 'vibracao', 'recomecar', 'continuar'] as const;
+  const linhas = ['comportamento', 'quantidade', 'formacao', 'cores', 'placas', 'esticar', 'decolagem', 'vibracao', 'recomecar', 'continuar'] as const;
   let pausado = false, linha = 0, seguraY = 0, eixoArmado = true;
   const pp = document.createElement('canvas'); pp.width = 640; pp.height = 640;
   const ptx = new THREE.CanvasTexture(pp); ptx.colorSpace = THREE.SRGBColorSpace;
@@ -226,6 +230,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       case 'cores': return config.cores ? T.painel.sim : T.painel.nao;
       case 'placas': return config.placas ? T.painel.sim : T.painel.nao;
       case 'esticar': return config.esticar.toFixed(1) + '×';
+      case 'decolagem': return T.decolagens[config.decolagem];
       default: return '';
     }
   }
@@ -235,7 +240,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     g.fillStyle = '#4fd6d0'; g.font = '900 44px "Baloo 2", Nunito, sans-serif'; g.fillText(T.pausa, 28, 62);
     g.font = '700 30px Nunito, sans-serif';
     linhas.forEach((n, i) => {
-      const y = 120 + i * 52, sel = i === linha;
+      const y = 112 + i * 48, sel = i === linha;
       if (sel) { g.fillStyle = 'rgba(79,214,208,0.22)'; g.fillRect(16, y - 36, 608, 48); }
       g.fillStyle = sel ? '#ffe066' : '#e8f3f2';
       g.fillText(T.painel[n], 28, y);
@@ -261,6 +266,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     if (n === 'quantidade') config.quantidade = Math.min(15, Math.max(1, config.quantidade + d));
     if (n === 'cores') config.cores = !config.cores;
     if (n === 'placas') config.placas = !config.placas;
+    if (n === 'decolagem') config.decolagem = config.decolagem === 'voar' ? 'escurecer' : 'voar';
     if (n === 'esticar') config.esticar = Math.round(Math.min(2.2, Math.max(1, config.esticar + d * 0.1)) * 10) / 10;
   }
   function confirmarLinha(): void {
@@ -290,7 +296,6 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   // ---------- vibração prevista no Quest (online) ----------
   const recarga = new Map<string, number>();
   const anterior: Record<Lado, THREE.Vector3 | null> = { esq: null, dir: null };
-  const v3 = new THREE.Vector3();
   function preverContatos(dt: number, agora: number): void {
     const raioMao = URSO.raioMao * (estadoPata.tamanho / 1.3), cab = camera.getWorldPosition(new THREE.Vector3());
     for (const l of ['esq', 'dir'] as const) {
@@ -299,14 +304,14 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       if (!a) continue;
       const vel = { x: (p.x - a.x) / dt, y: (p.y - a.y) / dt, z: (p.z - a.z) / dt }, rapidez = Math.hypot(vel.x, vel.y, vel.z);
       const m = entrada.maos[l], punho = m.gatilhoValor > 0.6 && m.gripValor > 0.6;
-      const area = rapidez < 1.6 ? 0 : GOLPES[classificarGolpe(vel, { x: p.x - cab.x, y: 0, z: p.z - cab.z }, punho)].area;
+      const area = rapidez < EQUILIBRIO.velocidadeMinimaGolpe ? 0 : GOLPES[classificarGolpe(vel, { x: p.x - cab.x, y: 0, z: p.z - cab.z }, punho)].area;
       for (const b of pbs.posicoes()) {
-        const yEixo = Math.max(b.pos.y - PIRANBENJA.altura / 2 + PIRANBENJA.raio, Math.min(b.pos.y + PIRANBENJA.altura / 2 - PIRANBENJA.raio, p.y));
-        v3.set(p.x - b.pos.x, p.y - yEixo, p.z - b.pos.z);
-        if (v3.length() > raioMao + area + PIRANBENJA.raio + 0.03) continue;
+        // confere o caminho inteiro da pata desde o quadro anterior (um soco rápido não atravessa sem encostar)
+        const eixoA = { x: b.pos.x, y: b.pos.y - PIRANBENJA.altura / 2 + PIRANBENJA.raio, z: b.pos.z }, eixoB = { x: b.pos.x, y: b.pos.y + PIRANBENJA.altura / 2 - PIRANBENJA.raio, z: b.pos.z };
+        if (pertoEntreSegmentos(a, p, eixoA, eixoB).d > raioMao + area + PIRANBENJA.raio + 0.03) continue;
         const chave = l + b.numero;
         if ((recarga.get(chave) ?? 0) > agora) continue;
-        if (rapidez < 1.6) { recarga.set(chave, agora + 0.5); vibrar(l, ...VIBRACAO.encostar); continue; }
+        if (rapidez < EQUILIBRIO.velocidadeMinimaGolpe) { recarga.set(chave, agora + 0.5); vibrar(l, ...VIBRACAO.encostar); continue; }
         recarga.set(chave, agora + 0.35);
         const q = qualidadeDoGolpe(vel, { x: b.pos.x - p.x, y: 0, z: b.pos.z - p.z });
         const [forca, ms] = VIBRACAO[q]; vibrar(l, forca, ms);
@@ -349,7 +354,43 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     if (ev.tipo === 'arremessou') vibrar(ev.mao, ...VIBRACAO.arremessar);
     if (ev.tipo === 'strike') { const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.strike, { x: c.x, y: c.y + 0.2, z: c.z - 3 }, '#ff7a6b', 0.9, 1.4); }
     if (ev.tipo === 'fimRodada') avisar(ev.vencedor === 'urso' ? T.fimUrso : T.fimPiranbenja);
-    if (ev.tipo === 'novaRodada') { rig.position.set(0, 0, 3); rig.rotation.set(0, 0, 0); empurrao.set(0, 0, 0); }
+    if (ev.tipo === 'ursoDecolou') decolar(ev.vel);
+    if (ev.tipo === 'novaRodada') { rig.position.set(0, 0, 3); rig.rotation.set(0, 0, 0); empurrao.set(0, 0, 0); voo = null; escuro = null; telaPreta.visible = false; }
+  }
+
+  // ---------- decolagem: voar junto (modo Insano, padrão) ou escurecer e aparecer onde caiu ----------
+  let voo: THREE.Vector3 | null = null;
+  let escuro: { t: number; destino: THREE.Vector3; mudou: boolean } | null = null;
+  const telaPreta = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthTest: false }));
+  telaPreta.position.set(0, 0, -0.15); telaPreta.renderOrder = 99; telaPreta.visible = false; camera.add(telaPreta);
+  const dentroDoRingue = (p: THREE.Vector3) => Math.hypot(p.x, p.z) <= RINGUE.raio;
+  function decolar(vel: V3): void {
+    empurrao.set(0, 0, 0);
+    if (config.decolagem === 'voar') { voo = new THREE.Vector3(vel.x, vel.y, vel.z); return; }
+    // escurecer: calcula onde cai (arco simples) e leva o urso para lá com a tela escura
+    const t = (2 * vel.y) / 9.81, destino = rig.position.clone().add(new THREE.Vector3(vel.x * t, 0, vel.z * t));
+    const cab = camera.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(vel.x * t, 0, vel.z * t));
+    if (!dentroDoRingue(cab)) destino.y = -6;
+    escuro = { t: 0, destino, mudou: false }; telaPreta.visible = true;
+  }
+  function voar(dt: number): void {
+    const esc = ultimaFoto?.escalaTempo ?? 1; // câmera lenta da luta vale também para o voo
+    if (voo) {
+      const d = dt * esc;
+      rig.position.addScaledVector(voo, d); voo.y -= 9.81 * d;
+      const cab = camera.getWorldPosition(new THREE.Vector3());
+      if (rig.position.y <= 0 && voo.y < 0) {
+        if (dentroDoRingue(cab)) { rig.position.y = 0; voo = null; }
+        else if (rig.position.y < -8) voo.set(0, 0, 0); // caiu fora: para lá embaixo
+      }
+    }
+    if (escuro) {
+      escuro.t += dt;
+      const m = telaPreta.material as THREE.MeshBasicMaterial;
+      m.opacity = escuro.t < 0.25 ? escuro.t / 0.25 : escuro.t < 0.45 ? 1 : Math.max(0, 1 - (escuro.t - 0.45) / 0.35);
+      if (escuro.t >= 0.25 && !escuro.mudou) { rig.position.copy(escuro.destino); escuro.mudou = true; }
+      if (escuro.t > 0.8) { escuro = null; telaPreta.visible = false; }
+    }
   }
 
   // ---------- quadro a quadro ----------
@@ -384,14 +425,14 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       lerVR();
       if (medirEm > 0 && --medirEm === 0 && camera.position.y > 0.5) alturaReal = camera.position.y;
       controlarPausa();
-      if (!pausado) {
+      if (!pausado && !voo && !escuro) {
         // analógico esquerdo anda (o gigante anda mais por passo); direito gira 30°
         const a = entrada.maos.esq.analogico;
         if (a.lengthSq() > 0.01) {
           const fr = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion())); fr.y = 0; fr.normalize();
           const la = new THREE.Vector3(-fr.z, 0, fr.x);
           const lento = 1 - Math.min(0.6, (ultimaFoto?.urso.grudados ?? 0) * 0.05); // cada clone grudado: 5% mais lento (D-083)
-          rig.position.addScaledVector(fr.multiplyScalar(-a.y).add(la.multiplyScalar(a.x)), 1.4 * rig.scale.x * dt * lento);
+          rig.position.addScaledVector(fr.multiplyScalar(-a.y).add(la.multiplyScalar(a.x)), 1.0 * rig.scale.x * dt * lento); // C19: o urso anda mais devagar (~1,5 m/s; o Piranbenja corre a 2,8)
         }
         const d = entrada.maos.dir.analogico;
         if (Math.abs(d.x) < 0.3) giroArmado = true;
@@ -404,7 +445,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     rig.scale.setScalar(escala());
     posicionarPatas();
     // empurrão recebido: desliza e perde força
-    if (!pausado) { rig.position.addScaledVector(empurrao, dt); empurrao.multiplyScalar(Math.exp(-2.5 * dt)); }
+    if (!pausado) { rig.position.addScaledVector(empurrao, dt); empurrao.multiplyScalar(Math.exp(-2.5 * dt)); voar(dt); }
     const e = entradaDoUrso();
     let foto: Foto | null;
     if (luta) {
@@ -431,7 +472,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   desenharPulso(null);
   render.setAnimationLoop(quadro);
   (window as unknown as { __teste: unknown }).__teste = { THREE, entrada, rig, camera, patas, alvoPata, config, pbs, get luta() { return luta; }, get canal() { return canal; }, fotos,
-    get pausado() { return pausado; }, get acertos() { return acertos; }, get pulsoVisivel() { return painelPulso.visible; },
+    get pausado() { return pausado; }, get acertos() { return acertos; }, get pulsoVisivel() { return painelPulso.visible; }, get voando() { return !!voo || !!escuro; },
     abrirPausa, fecharPausa,
     // só para os testes: o Chromium sem tela desenha poucos quadros; isto manda a entrada na hora
     enviarAgora: () => { posicionarPatas(); if (canal?.conectado()) canal.enviarRapido(codificarEntrada(entradaDoUrso())); } };

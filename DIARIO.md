@@ -25,3 +25,7 @@ Depois do primeiro teste no Quest, o urso ganhou golpes diferentes conforme a m�
 Agora dá para jogar de Piranbenja sozinho no computador, contra um UrsoBura controlado pelo jogo: ele pode ficar parado como boneco de treino, andar meio bobo ou partir para cima, batendo, agarrando e arremessando. O urso ganhou corpo inteiro, com braços de verdade ligados aos ombros, e ninguém atravessa ninguém. O Piranbenja dá tapas e socos; os clones também mordem, e quem morde fica grudado no braço do urso, balançando junto, até ser sacudido ou arrancado. E a mochila do Piranbenja voltou para as costas.
 
 ![Teste do Piranbenja no PC: o urso de corpo inteiro e um clone grudado](docs/diario/2026-10-26_piranbenja_pc.png)
+
+## 26/10/2026 — Agora o urso voa
+
+Depois de jogar com uma criança de verdade, o UrsoBura parecia impossível de derrotar. Os tapas e as mordidas ficaram mais fortes, a água enche mais rápido e o urso anda mais devagar. Três socos juntos num urso cansado fazem ele decolar num arco de anime, em câmera lenta, e quem joga no óculos voa junto. Também nasceram as armadilhas de morder, o clone salva-vidas (criar clones enquanto cai do ringue te traz de volta) e um truque para confundir o urso: ao criar clones, as estrelinhas de tontura do original passam para um clone.

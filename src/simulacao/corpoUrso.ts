@@ -53,10 +53,13 @@ function cotoveloIK(ombro: V3, pata: V3, lado: number, frente: V3, direita: V3):
 export function esqueletoUrso(e: PoseUrso): EsqueletoUrso {
   const C = CORPO_URSO;
   const { frente, direita } = eixosDoGiro(e.giro);
-  const k = Math.min(1.15, Math.max(0.55, e.cabeca.y / 2.45)); // agachar encolhe pernas e tronco
-  const base = soma(v(e.cabeca.x, 0, e.cabeca.z), vezes(frente, -0.15)); // o corpo fica um pouco atrás da cabeça
+  // no ar (decolou) o corpo todo sobe; caindo fora do ringue, desce; agachar encolhe pernas e tronco
+  const elev = e.cabeca.y > 2.5 ? e.cabeca.y - 2.5 : e.cabeca.y < 1.35 ? e.cabeca.y - 1.35 : 0;
+  const yCab = e.cabeca.y - elev;
+  const k = Math.min(1.15, Math.max(0.55, yCab / 2.45));
+  const base = soma(v(e.cabeca.x, elev, e.cabeca.z), vezes(frente, -0.15)); // o corpo fica um pouco atrás da cabeça
   const quadril = soma(base, v(0, 1.0 * k, 0));
-  const peito = soma(base, v(0, Math.max(quadril.y + 0.25, e.cabeca.y - 0.62), 0));
+  const peito = soma(base, v(0, Math.max(1.0 * k + 0.25, yCab - 0.62), 0));
   const segs: Segmento[] = [
     { nome: 'cabeca', a: e.cabeca, b: e.cabeca, r: C.raioCabeca },
     { nome: 'tronco', a: soma(quadril, v(0, 0.05, 0)), b: peito, r: C.raioTronco },

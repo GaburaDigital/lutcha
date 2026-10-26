@@ -16,7 +16,7 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
-  AGUA, ATORDOA_RASPAO, GOLPES, JANELA_COMBO, MARTELADA_PRESO, MULT_QUALIDADE, PARTE_VIZINHOS, PESO, PIRANBENJA, RINGUE, URSO,
+  AGUA, ATORDOA_RASPAO, EQUILIBRIO, GOLPES, JANELA_COMBO, MARTELADA_PRESO, MULT_QUALIDADE, PARTE_VIZINHOS, PESO, PIRANBENJA, RINGUE, URSO,
   classificarGolpe, fatorCombo, gerarBlocos, lancamento, modsDaZona, qualidadeDoGolpe, zonaDoContato,
   type NomeGolpe, type Qualidade, type TipoGolpe, type V3, type Zona,
 } from './regras';
@@ -81,6 +81,7 @@ export type Evento =
   | { tipo: 'clones'; quantos: number }
   | { tipo: 'cameraLenta'; segundos: number; escala: number }
   | { tipo: 'ursoGolpeado'; golpe: TipoGolpe; combo: number; empurrao: { x: number; z: number }; ataque?: AtaquePB; parte?: SegUrso; ponto?: V3; numero?: number }
+  | { tipo: 'ursoDecolou'; vel: V3 }
   | { tipo: 'grudou'; numero: number; parte: SegUrso }
   | { tipo: 'soltouGrudado'; numero: number; como: 'sacudida' | 'arrancado' }
   | { tipo: 'fimRodada'; vencedor: 'urso' | 'piranbenja'; placar: { urso: number; piranbenja: number } }
@@ -112,7 +113,8 @@ interface Piranbenja {
   pensarEm: number; alvo: V3; ataqueEm: number;
   ataquePedido: AtaquePB | null;
   ataqueTipo: AtaquePB;      // o que está armando
-  simples: boolean;          // clone simples: mais barato, mais fraco, reage mais devagar e não morde
+  simples: boolean;          // clone simples: mais barato, mais fraco, reage mais devagar e não morde (só a armadilha morde)
+  armadilha: boolean;        // armadilha de morder: fica parada onde nasceu e morde o urso que passar perto
   armadoAte: number; atacandoAte: number; recuarAte: number;
   atordoadoAte: number; achatadoAte: number;
   naFormacao: boolean;
@@ -150,7 +152,7 @@ const JUNTAS: [Parte, Parte, V3][] = [
 const GRUPO_RAGDOLL = (0x0002 << 16) | 0xfffd; // é do grupo 2 e não bate no grupo 2
 const MAX_RAGDOLLS = 4;
 /** Clone simples custa menos água (D-075): proposta para o teste. */
-export const CUSTO_SIMPLES = 8;
+export const CUSTO_SIMPLES = 6; // C19: 8 → 6
 /** Grudados: no máximo 6 ao mesmo tempo; cada um tira 1 de resistência por segundo e deixa o urso 5% mais lento (D-083). */
 const MAX_GRUDADOS = 6;
 /** Sacudir: a parte mordida passando de 6,5 m/s por 0,1 s solta quem está grudado. */
@@ -201,6 +203,10 @@ export class Luta {
   private recargaMartelada: Record<Lado, number> = { esq: 0, dir: 0 };
   private ursoAcertos: number[] = [];
   private juntasFormacao: { a: Piranbenja; b: Piranbenja; j: RAPIER.ImpulseJoint }[] = [];
+  /** Até quando o urso está no ar depois de decolar (não golpeia nem agarra). */
+  private ursoNoArAte = 0;
+  /** Clone salva-vidas: só de novo depois desta hora. */
+  private salvaVidasAte = 0;
   /** Testes: quanto alguém chegou a entrar no urso antes de ser empurrado (m). */
   maiorEntrada = 0;
   agua = AGUA.inicial;
@@ -263,7 +269,7 @@ export class Luta {
     for (const p of this.pbs) { this.apagarRagdoll(p); this.mundo.removeRigidBody(p.corpo); }
     this.pbs = [];
     for (const l of ['esq', 'dir'] as const) this.segurando[l] = null;
-    this.bot?.reiniciar();
+    this.bot?.reiniciar(); this.ursoNoArAte = 0; this.salvaVidasAte = 0;
     this.agua = AGUA.inicial; this.ursoRes = 100; this.ursoAura = 0; this.rodada = 'luta';
     const f = this.opcoes.formacao ?? 'solto';
     if (f !== 'solto') { this.montarFormacao(f); return; }
@@ -281,7 +287,7 @@ export class Luta {
     this.mundo.createCollider(RAPIER.ColliderDesc.capsule(PIRANBENJA.altura / 2 - PIRANBENJA.raio, PIRANBENJA.raio)
       .setMass(original ? PESO.original : PESO.clone * (simples ? 0.8 : 1)).setFriction(0.6).setRestitution(0.15), corpo);
     return {
-      numero: 0, original, corpo, res: original ? PIRANBENJA.resOriginal : PIRANBENJA.resClone * (simples ? 0.5 : 1), simples,
+      numero: 0, original, corpo, res: original ? PIRANBENJA.resOriginal : PIRANBENJA.resClone * (simples ? 0.5 : 1), simples, armadilha: false,
       voandoAte: 0, agarradoPor: null, acertosRecentes: [], cadeia: { derrubados: 0 }, jaBateu: new Set(),
       estado: 'andando', pensarEm: 0, alvo: { ...pos }, ataqueEm: 0, ataquePedido: null, ataqueTipo: 'tapa',
       armadoAte: 0, atacandoAte: 0, recuarAte: 0, atordoadoAte: 0, achatadoAte: 0, naFormacao: false, ragdoll: null,
@@ -295,20 +301,52 @@ export class Luta {
     if (quantos <= 0) return 0;
     if (!gratis) this.agua -= quantos * custo;
     const orig = this.pbs.find((p) => p.original)!;
-    this.soltarDeTudo(orig);
-    const c = orig.corpo.translation();
+    // segurado pela pata: os clones nascem, mas o original continua preso (não é fuga)
+    const preso = !!orig.agarradoPor;
+    const po = this.posDe(orig);
+    // clone salva-vidas (C18/C19): se o original está caindo do ringue, ele troca de lugar com um clone novo
+    // e volta à plataforma; só funciona de novo depois de 8 s
+    const caindo = po.y < PIRANBENJA.altura / 2 - 0.1 || Math.hypot(po.x, po.z) > RINGUE.raio;
+    const salva = caindo && !preso && this.tempo >= this.salvaVidasAte;
+    if (salva) this.salvaVidasAte = this.tempo + EQUILIBRIO.esperaSalvaVidas;
+    const troca = !preso && (!caindo || salva);
+    // efeitos que o original mostra (tonto, achatado, armando) passam para um clone novo (C18/C19)
+    const tonto = this.tempo < orig.atordoadoAte || !!orig.ragdoll, achatado = this.tempo < orig.achatadoAte, armando = orig.estado === 'armando';
+    const efeito = { tonto: Math.max(orig.atordoadoAte - this.tempo, orig.ragdoll ? 1.2 : 0), achatado: orig.achatadoAte - this.tempo, armando, tipo: orig.ataqueTipo, armadoAte: orig.armadoAte };
+    const tinhaEfeito = troca && (tonto || achatado || armando);
+    if (troca) this.soltarDeTudo(orig);
+    const c = troca ? this.posDe(orig) : po;
+    const centro = vec(c.x, 0, c.z); const rc = Math.hypot(centro.x, centro.z), mx = RINGUE.raio - 1.2;
+    if (rc > mx) { centro.x *= mx / rc; centro.z *= mx / rc; } // em volta de um ponto dentro do ringue
     const vagas: V3[] = [];
     const total = quantos + 1, giro = this.aleatorio() * Math.PI * 2;
     for (let i = 0; i < total; i++) {
       const a = giro + (i / total) * Math.PI * 2, r = 0.8 + this.aleatorio() * 0.5;
-      let x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+      let x = centro.x + Math.cos(a) * r, z = centro.z + Math.sin(a) * r;
       const d = Math.hypot(x, z); if (d > RINGUE.raio - 0.6) { x *= (RINGUE.raio - 0.6) / d; z *= (RINGUE.raio - 0.6) / d; }
       vagas.push(vec(x, PIRANBENJA.altura / 2 + 0.05, z));
     }
     const vagaOrig = Math.floor(this.aleatorio() * total);
-    orig.corpo.setTranslation(vagas[vagaOrig], true); orig.corpo.setLinvel({ x: 0, y: 0, z: 0 }, true); orig.alvo = { ...vagas[vagaOrig] };
+    if (troca) {
+      orig.corpo.setTranslation(vagas[vagaOrig], true); orig.corpo.setLinvel({ x: 0, y: 0, z: 0 }, true); orig.alvo = { ...vagas[vagaOrig] };
+      orig.corpo.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true); orig.corpo.setAngvel({ x: 0, y: 0, z: 0 }, true); orig.corpo.lockRotations(true, true);
+      orig.voandoAte = 0;
+    }
     vagas.splice(vagaOrig, 1);
-    for (const v of vagas) this.pbs.push(this.novoPiranbenja(false, v, simples));
+    const novos: Piranbenja[] = [];
+    vagas.forEach((v, i) => {
+      const n = this.novoPiranbenja(false, v, simples);
+      // um em cada três clones simples vira "armadilha de morder": fica parado onde nasceu e morde quem passa perto
+      if (simples && i % 3 === 2) n.armadilha = true;
+      this.pbs.push(n); novos.push(n);
+    });
+    if (tinhaEfeito && novos.length) {
+      const herdeiro = novos[Math.floor(this.aleatorio() * novos.length)];
+      if (tonto) { herdeiro.atordoadoAte = this.tempo + efeito.tonto; herdeiro.estado = 'atordoado'; }
+      if (achatado) herdeiro.achatadoAte = this.tempo + efeito.achatado;
+      if (armando && !tonto) { herdeiro.estado = 'armando'; herdeiro.armadoAte = efeito.armadoAte; herdeiro.ataqueTipo = efeito.tipo === 'morder' ? 'tapa' : efeito.tipo; }
+      orig.atordoadoAte = 0; orig.achatadoAte = 0; orig.estado = 'andando'; orig.ataquePedido = null;
+    }
     this.sortearNumeros();
     this.eventos.push({ tipo: 'clones', quantos });
     return quantos;
@@ -470,10 +508,10 @@ export class Luta {
   private quantosAtacando(): number { return this.pbs.filter((p) => p.estado === 'aproximando' || p.estado === 'armando' || p.estado === 'atacando').length; }
 
   private armar(p: Piranbenja, tipo?: AtaquePB): void {
-    p.estado = 'armando'; p.armadoAte = this.tempo + 0.6;
+    p.estado = 'armando'; p.armadoAte = this.tempo + EQUILIBRIO.armar;
     // clones: mordida, tapa ou soco; o simples só dá tapa; o original nunca morde (C16)
     const r = this.aleatorio();
-    p.ataqueTipo = tipo ?? (p.simples ? 'tapa' : r < 0.45 && !p.original ? 'morder' : r < 0.65 ? 'tapa' : 'soco');
+    p.ataqueTipo = tipo ?? (p.armadilha ? 'morder' : p.simples ? 'tapa' : r < 0.45 && !p.original ? 'morder' : r < 0.65 ? 'tapa' : 'soco');
     if (p.original && p.ataqueTipo === 'morder') p.ataqueTipo = 'tapa';
     if (!p.original || this.opcoes.originalAutomatico) p.alvo = this.posDe(p); // o clone para enquanto arma
   }
@@ -509,6 +547,12 @@ export class Luta {
     const u = this.entrada.cabeca, pos = this.posDe(p), d = this.distanciaAoUrso(pos);
     const comp = this.opcoes.comportamento ?? 'cautelosos';
     if (p.estado === 'aproximando' && d < 0.55 && this.tempo > p.ataqueEm) { this.armar(p); return; }
+    if (p.armadilha) {
+      // parada onde nasceu; quando o urso encosta quase, arma a mordida
+      p.estado = 'parado'; p.alvo = pos;
+      if (d < 0.45 && this.tempo > p.ataqueEm) { this.armar(p); p.ataqueEm = this.tempo + 1.5; }
+      return;
+    }
     if (this.tempo < p.pensarEm) return;
     // pensa a cada ~0,25 s + reação de 0,2 a 1,2 s (o simples reage mais devagar)
     p.pensarEm = this.tempo + (0.25 + 0.2 + this.aleatorio() * 1.0) * (p.simples ? 1.6 : 1);
@@ -581,7 +625,7 @@ export class Luta {
     for (const l of ['esq', 'dir'] as const) {
       const v = this.velMao[l], vel = len(v);
       const cam = this.caminho[l]; this.caminho[l] = null;
-      if (vel < 1.6 || this.segurando[l]) continue;
+      if (vel < EQUILIBRIO.velocidadeMinimaGolpe || this.segurando[l] || this.tempo < this.ursoNoArAte) continue;
       // pontos do caminho da pata desde a última amostra (ou só a posição atual)
       const pontos: V3[] = [];
       if (cam) for (let i = 1; i <= 6; i++) { const k = i / 6; pontos.push(vec(cam.de.x + (cam.ate.x - cam.de.x) * k, cam.de.y + (cam.ate.y - cam.de.y) * k, cam.de.z + (cam.ate.z - cam.de.z) * k)); }
@@ -761,7 +805,7 @@ export class Luta {
   // ---------------- agarrar e jogar ----------------
   private agarrarESoltar(): void {
     // a pata não entra no Piranbenja (é empurrado para fora), então o alcance de agarrar passa um pouco da superfície
-    const alcance = URSO.raioMao * (this.entrada.tamanhoPata / 1.3) + PIRANBENJA.raio + 0.25;
+    const alcance = URSO.raioMao * (this.entrada.tamanhoPata / 1.3) + PIRANBENJA.raio + EQUILIBRIO.folgaAgarrar;
     for (const l of ['esq', 'dir'] as const) {
       const m = this.entrada.maos[l];
       const fechou = m.grip > 0.7, antes = this.gripAntes[l];
@@ -786,7 +830,7 @@ export class Luta {
         continue;
       }
       // agarra quando a mão fecha perto de alguém e a pata está devagar; pata rápida de punho fechado é soco
-      if (!fechou || antes || len(this.velMao[l]) > 2.5) continue;
+      if (!fechou || antes || len(this.velMao[l]) > EQUILIBRIO.agarrarAte || this.tempo < this.ursoNoArAte) continue;
       let melhor: Piranbenja | null = null, md = alcance;
       for (const p of this.pbs) {
         if (p.agarradoPor) continue;
@@ -870,7 +914,7 @@ export class Luta {
         melhor.q.z + ((origem.z - melhor.q.z) / Math.max(1e-3, melhor.d + melhor.seg.r)) * melhor.seg.r);
       const base = { tipo: 'ursoGolpeado' as const, golpe: tipo, ataque, parte: melhor.seg.nome, ponto, numero: p.numero };
       if (tipo === 'dano') {
-        this.ursoRes = Math.max(0, this.ursoRes - (ataque === 'morder' ? 3 : 2) * (p.simples ? 0.6 : 1));
+        this.ursoRes = Math.max(0, this.ursoRes - (ataque === 'morder' ? EQUILIBRIO.danoMordida : EQUILIBRIO.danoTapa) * (p.simples ? 0.6 : 1));
         this.eventos.push({ ...base, combo: 1, empurrao: { x: 0, z: 0 } });
         // mordida de clone gruda (D-082): vira boneco solto preso pela boca na parte mordida
         if (ataque === 'morder' && !p.original && this.grudados().length < MAX_GRUDADOS) this.grudar(p, melhor.seg, melhor.t, origem);
@@ -879,9 +923,22 @@ export class Luta {
       // impacto: ataques combinados (vários Piranbenjas juntos) aumentam muito o empurrão
       this.ursoAcertos = this.ursoAcertos.filter((t) => this.tempo - t < JANELA_COMBO); this.ursoAcertos.push(this.tempo);
       const combo = fatorCombo(this.ursoAcertos.length);
-      const L = lancamento(2.2 * (p.simples ? 0.6 : 1), this.ursoRes / 100, PESO.urso, combo);
+      const L = lancamento(EQUILIBRIO.impactoSoco * (p.simples ? 0.6 : 1), this.ursoRes / 100, PESO.urso, combo);
       this.ursoRes = Math.max(0, this.ursoRes - 1);
-      this.eventos.push({ ...base, combo, empurrao: { x: (para.x / n) * L, z: (para.z / n) * L } });
+      const dx = para.x / n, dz = para.z / n;
+      if (L > EQUILIBRIO.decolarUrso && this.tempo >= this.ursoNoArAte) {
+        // o urso decola: voa em arco (no Quest, a câmera vai junto ou escurece), não ataca no ar
+        // arco de anime: sobe bem (~1,5 m) e vai uns 5 m para trás; perto da borda, cai fora do ringue
+        const v = vec(dx * L * 0.8, 3 + L * 0.4, dz * L * 0.8);
+        this.ursoNoArAte = this.tempo + (2 * v.y) / 9.81;
+        this.eventos.push({ ...base, combo, empurrao: { x: 0, z: 0 } });
+        this.eventos.push({ tipo: 'ursoDecolou', vel: v });
+        this.bot?.decolar(v);
+        this.cameraLenta(1.0);
+      } else {
+        this.eventos.push({ ...base, combo, empurrao: { x: dx * L, z: dz * L } });
+        this.bot?.empurrar(dx * L, dz * L);
+      }
     }
   }
 
@@ -954,7 +1011,7 @@ export class Luta {
       if (len(vel) > SACUDIDA) { if (!g.rapidoDesde) g.rapidoDesde = this.tempo; } else g.rapidoDesde = 0;
       if (g.rapidoDesde && this.tempo - g.rapidoDesde >= 0.1) { this.soltarGrudado(p, vel, 'sacudida'); continue; }
       rd.partes.cabeca.setNextKinematicTranslation(this.foraDoUrso(cabeca, LAYOUT_PARTES.cabeca.r));
-      if (this.rodada === 'luta') this.ursoRes = Math.max(0, this.ursoRes - 1 * dt);
+      if (this.rodada === 'luta') this.ursoRes = Math.max(0, this.ursoRes - EQUILIBRIO.grudadoPorSegundo * dt);
     }
   }
 
@@ -986,12 +1043,14 @@ export class Luta {
     const empurrarUmaVez = (corpo: RAPIER.RigidBody, eixo: V3, raio: number, noChao: boolean) => {
       const t = corpo.translation();
       const a = vec(t.x - eixo.x, t.y - eixo.y, t.z - eixo.z), b = vec(t.x + eixo.x, t.y + eixo.y, t.z + eixo.z);
-      let dx = 0, dy = 0, dz = 0;
+      let dx = 0, dy = 0, dz = 0, soPata = true;
       for (const seg of segs) {
         const r = pertoEntreSegmentos(a, b, seg.a, seg.b), pen = seg.r + raio - r.d;
         if (pen <= 0.002) continue;
+        if (!seg.nome.startsWith('pata')) soPata = false;
         let n = r.d > 1e-4 ? vec((r.c1.x - r.c2.x) / r.d, (r.c1.y - r.c2.y) / r.d, (r.c1.z - r.c2.z) / r.d) : vec(t.x - u.x, 0, t.z - u.z);
         if (noChao && n.y < 0) n = vec(n.x, 0, n.z); // no chão, empurra para o lado, nunca para dentro do chão
+        if (lenH(n) < 0.3 && n.y <= 0) n = vec(t.x - u.x || 0.01, 0, t.z - u.z); // urso caindo bem em cima: sai para o lado
         const nn = len(n) || 1; n = vec(n.x / nn, n.y / nn, n.z / nn);
         dx += n.x * pen; dy += n.y * pen; dz += n.z * pen;
       }
@@ -1000,7 +1059,8 @@ export class Luta {
       const v = corpo.linvel(), m = Math.hypot(dx, dy, dz), n = vec(dx / m, dy / m, dz / m);
       const vn = v.x * n.x + v.y * n.y + v.z * n.z;
       // tira a parte da velocidade que entra no urso e dá um empurrão leve para fora (no máximo 1,2 m/s)
-      const novo = Math.min(1.2, Math.max(0.25, -vn * 0.3));
+      // a pata não empurra (C19): só não deixa entrar, para dar para agarrar quem está encostado
+      const novo = soPata ? Math.max(0, vn) : Math.min(1.2, Math.max(0.25, -vn * 0.3));
       const k = novo - vn;
       corpo.setLinvel({ x: v.x + n.x * k, y: v.y + n.y * k, z: v.z + n.z * k }, true);
       return m;
@@ -1109,7 +1169,7 @@ export class Luta {
   testeGrudados(): { numero: number; parte: SegUrso }[] { return this.grudados().map((p) => ({ numero: p.numero, parte: p.ragdoll!.grudado!.seg })); }
   /** Quanto alguém está dentro do urso agora (m): cápsulas e partes dos bonecos soltos contra os segmentos do corpo. */
   ultimaSobreposicao = '';
-  testeSobreposicao(): number {
+  testeSobreposicao(ignorarAgarrados = false): number {
     let m = 0;
     let quem = '';
     const medir = (c: V3, eixo: V3, r: number, nome = '') => {
@@ -1118,6 +1178,7 @@ export class Luta {
     };
     for (const p of this.pbs) {
       if (!p.ragdoll) { if (!p.agarradoPor) { const t = p.corpo.translation(); medir(vec(t.x, t.y, t.z), girar(p.corpo.rotation(), vec(0, 0.25, 0)), PIRANBENJA.raio, 'capsula'); } continue; }
+      if (ignorarAgarrados && p.agarradoPor) continue;
       for (const n of PARTES) { const b = p.ragdoll.partes[n], t = b.translation(), L = LAYOUT_PARTES[n]; medir(vec(t.x, t.y, t.z), girar(b.rotation(), vec(0, L.hh, 0)), L.r, n + (b.isDynamic() ? '' : '(fixa)') + (p.agarradoPor ? '/agarrado' : p.ragdoll.grudado ? '/grudado' : '')); }
     }
     if (m > 0.03) this.ultimaSobreposicao = quem + ' ' + m.toFixed(2);

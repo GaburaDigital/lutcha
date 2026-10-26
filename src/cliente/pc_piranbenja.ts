@@ -213,6 +213,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
     }
     if (ev.tipo === 'grudou') { const p = onde(ev.numero); if (p && performance.now() / 1000 - ultimaPalavra > 0.3) onos.mostrar(T.grudou, { ...p, y: p.y + 0.6 }, '#ffb15c', 0.35); escrever(`Clone grudou: ${T.partesUrso[zonaDoSegmento(ev.parte)]}`); }
     if (ev.tipo === 'soltouGrudado') { const p = onde(ev.numero); if (p) onos.mostrar(T.soltou, { ...p, y: p.y + 0.6 }, '#e8f3f2', 0.35); escrever(ev.como === 'sacudida' ? 'O urso sacudiu e soltou um clone' : 'O urso arrancou um clone com a pata'); }
+    if (ev.tipo === 'ursoDecolou') { escrever('O urso decolou!'); const c = luta.entradaUrso.cabeca; onos.mostrar(T.decolou, { ...c, y: c.y + 0.7 }, '#ffe066', 0.9, 1.6); }
     if (ev.tipo === 'strike') { escrever('STRIKE!'); onos.mostrar(T.strike, { x: 0, y: 2.5, z: 0 }, '#ff7a6b', 1.0, 1.4); }
     if (ev.tipo === 'derreteu') escrever('Um clone derreteu');
     if (ev.tipo === 'clones') escrever(`${ev.quantos} clones novos`);

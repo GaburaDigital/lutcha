@@ -81,7 +81,7 @@ with servidor(), sync_playwright() as p:
     solo.evaluate("() => { __vr.maoMundo('esq', -0.5, 1.4, 2.4); __vr.maoMundo('dir', 0.3, 1.4, 2.4); }"); time.sleep(2)
     confere('solo começa com a pirâmide', J(solo, 'return t.luta.foto().piranbenjas.length') == 6 and J(solo, "return t.luta.foto().piranbenjas.filter(p => p.estado === 'formacao').length") == 6)
     solo.evaluate("""async () => { window.__vib = []; __vr.dedos('dir', 1, 1); await new Promise(r => setTimeout(r, 400));
-      for (let i = 0; i <= 8; i++) { __vr.maoMundo('dir', 0.05, 0.5, 2.3 - i * 0.1); await new Promise(r => setTimeout(r, 260)); } }""")
+      for (let i = 0; i <= 5; i++) { __vr.maoMundo('dir', 0.05, 0.5, 2.4 - i * 0.2); await new Promise(r => setTimeout(r, 260)); } }""")  # passos de 20 cm: acima da velocidade mínima de golpe mesmo com poucos quadros
     time.sleep(0.3)
     solo.screenshot(path=F + 'rede_04_solo_piramide_soco.png')
     vib = solo.evaluate('() => window.__vib || []')
@@ -103,6 +103,16 @@ with servidor(), sync_playwright() as p:
     confere('pausa com Y congela a luta', J(solo, 'return t.pausado') is True and tick1 == tick2, {'pausado': J(solo, 'return t.pausado'), 'ticks': [tick1, tick2]})
     solo.screenshot(path=F + 'rede_06_solo_pausa.png')
     J(solo, 't.fecharPausa()')
+    # decolagem no Quest: voa junto (padrão) e volta ao chão; com "escurecer", a tela escurece e ele aparece onde caiu
+    J(solo, "t.luta.eventos.push({ tipo: 'ursoDecolou', vel: { x: 0, y: 5, z: -1 } })"); time.sleep(0.8)
+    no_ar = J(solo, 'return [t.voando, +t.rig.position.y.toFixed(2)]')
+    for _ in range(30):
+        time.sleep(0.3)
+        if not J(solo, 'return t.voando'): break
+    pousou = J(solo, 'return [t.voando, +t.rig.position.y.toFixed(2)]')
+    J(solo, "t.config.decolagem = 'escurecer'; t.luta.eventos.push({ tipo: 'ursoDecolou', vel: { x: 0, y: 5, z: -1 } })"); time.sleep(0.6)
+    escuro = J(solo, 'return t.voando')
+    confere('decolagem no Quest: voa e pousa; escurecer também funciona', no_ar[0] and no_ar[1] > 0.2 and not pousou[0] and pousou[1] == 0 and escuro is True, {'no ar': no_ar, 'pousou': pousou, 'escuro': escuro})
     # clones cautelosos com as placas de intenção
     solo2 = ctx.new_page(); solo2.on('pageerror', lambda e: erros.append('PAGEERROR ' + str(e)))
     solo2.goto(URL + '?modo=solo&formacao=solto&comportamento=ofensivos&quantidade=6'); solo2.wait_for_function('() => window.__teste && window.__teste.luta')

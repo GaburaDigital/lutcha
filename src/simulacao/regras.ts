@@ -23,7 +23,7 @@ export const PIRANBENJA = { altura: 0.9, raio: 0.2, velocidade: 2.8, resOriginal
 export const URSO = { altura: 2.7, raioCorpo: 0.5, raioMao: 0.15 };
 export const PESO = { urso: 4, original: 1, clone: 0.8 };
 
-export const AGUA = { maximo: 100, recarga: 2, custoClone: 15, inicial: 100 };
+export const AGUA = { maximo: 100, recarga: 3, custoClone: 15, inicial: 100 }; // recarga 2 → 3 (C19)
 
 /** Combo de impacto: acertos no mesmo alvo dentro de 0,4 s. */
 export const JANELA_COMBO = 0.4;
@@ -96,6 +96,17 @@ export const GOLPES: Record<NomeGolpe, { tipo: TipoGolpe; area: number; vizinhos
 };
 /** Vizinhos de quem levou o golpe recebem esta parte da força (C15: 60%). */
 export const PARTE_VIZINHOS = 0.6;
+/** Equilíbrio aprovado para testar (C19). */
+export const EQUILIBRIO = {
+  velocidadeMinimaGolpe: 3.0,   // m/s da pata: abaixo disso a pata só encosta (agarrar fica mais fácil)
+  agarrarAte: 3.0,              // m/s: até essa velocidade, fechar a mão perto agarra
+  folgaAgarrar: 0.3,            // m além da superfície do Piranbenja
+  danoTapa: 4, danoMordida: 5, grudadoPorSegundo: 2,
+  impactoSoco: 4.5,             // empurrão do soco no urso: ~1,1 m/s inteiro, ~2,7 m/s com resistência 30
+  decolarUrso: 4.0,             // m/s: acima disso o urso decola (voa em arco)
+  armar: 0.75,                  // s de aviso antes de atacar (original e clones)
+  esperaSalvaVidas: 8,          // s entre dois "clones salva-vidas"
+};
 /** Raspão atordoa só um instante. */
 export const ATORDOA_RASPAO = 0.3;
 /** Martelada prende o Piranbenja achatado no chão por este tempo (e pega só um por vez). */
