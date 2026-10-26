@@ -26,3 +26,9 @@ html, body, #app { margin: 0; height: 100%; background: var(--fundo); color: var
 .botao.principal { background: var(--lima); border-color: var(--lima); color: #10230a; }
 .botao:disabled { opacity: .45; cursor: default; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--aqua); outline-offset: 2px; }
+/* painel de configuração do solo de teste (embaixo da tela, antes de entrar no VR) */
+.placa.configuracao { bottom: 12px; }
+.placa.configuracao label { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; }
+.placa.configuracao select, .placa.configuracao input[type=number] { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--linha); background: #0c1a24; color: inherit; }
+.placa.configuracao input[type=number] { width: 4.5em; }
+.placa.configuracao input[type=checkbox] { width: 22px; height: 22px; }

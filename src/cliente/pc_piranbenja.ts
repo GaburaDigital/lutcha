@@ -69,11 +69,12 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
   const log = raiz.querySelector('#log') as HTMLOListElement;
   const escrever = (t: string) => { const li = document.createElement('li'); li.textContent = t; log.prepend(li); while (log.children.length > 6) log.lastChild?.remove(); };
   const ZONAS = { cabeca: 'na cabeça', tronco: 'no tronco', bracos: 'no braço', pernas: 'nas pernas' } as const;
+  const NOMES = { soco: 'soco', socoLateral: 'soco lateral', gancho: 'gancho', martelada: 'martelada', arranhao: 'arranhão', estocada: 'estocada' } as const;
   const QUAL = { cheio: 'em cheio', normal: 'normal', raspao: 'de raspão' } as const;
   function reagir(ev: Evento): void {
     const f = luta.foto();
     const onde = (n: number) => f.piranbenjas.find((p) => p.numero === n)?.pos;
-    if (ev.tipo === 'golpe') { const p = onde(ev.numero); if (p) onos.mostrar(ev.qualidade === 'cheio' ? 'POW!' : ev.qualidade === 'raspao' ? 'tsk' : 'PAF!', { ...p, y: p.y + 0.8 }, ev.qualidade === 'cheio' ? '#ffe066' : '#e8f3f2', 0.45); escrever(`Pata ${ev.mao === 'esq' ? 'esquerda' : 'direita'}: ${ev.golpe} ${QUAL[ev.qualidade]} ${ZONAS[ev.zona]} (lançamento ${ev.lancamento.toFixed(1)})`); }
+    if (ev.tipo === 'golpe') { const p = onde(ev.numero); if (p) onos.mostrar(ev.qualidade === 'cheio' ? 'POW!' : ev.qualidade === 'raspao' ? 'tsk' : 'PAF!', { ...p, y: p.y + 0.8 }, ev.qualidade === 'cheio' ? '#ffe066' : '#e8f3f2', 0.45); escrever(`Pata ${ev.mao === 'esq' ? 'esquerda' : 'direita'}: ${NOMES[ev.nome]} (${ev.golpe}) ${QUAL[ev.qualidade]} ${ZONAS[ev.zona]}${ev.vizinho ? ', de tabela' : ''} (lançamento ${ev.lancamento.toFixed(1)})`); }
     if (ev.tipo === 'strike') { escrever('STRIKE!'); onos.mostrar('STRIKE!', { x: 0, y: 2.5, z: 0 }, '#ff7a6b', 1.0, 1.4); }
     if (ev.tipo === 'derreteu') escrever('Um clone derreteu');
     if (ev.tipo === 'clones') escrever(`${ev.quantos} clones novos`);
@@ -98,7 +99,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
     ateFoto -= dt;
     if (ateFoto <= 0 && canal.conectado()) { ateFoto = 1 / 30; canal.enviarRapido(codificarFoto(luta.foto())); }
     const foto = luta.foto(), orig = luta.numeroDoOriginal();
-    pbs.desenhar(foto.piranbenjas, orig, marca);
+    pbs.desenhar(foto.piranbenjas, { destaque: orig, marca, olharPara: luta.entradaUrso.cabeca });
     urso.desenhar(luta.entradaUrso.cabeca, luta.entradaUrso.maos);
     // câmera atrás do original
     const o = foto.piranbenjas.find((p) => p.numero === orig)?.pos ?? { x: 0, y: 0.45, z: -3 };

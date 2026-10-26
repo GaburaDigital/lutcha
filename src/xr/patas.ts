@@ -66,27 +66,28 @@ export interface Mao {
   triangulos: number;
   /** escalaMundo = escala da plataforma do jogador (o pai do grip); a mão compensa para ficar no tamanho certo. */
   atualizar(gatilho: number, grip: number, estado: EstadoMao, escalaMundo: number, tempo: number, dt: number): void;
-  /** IK simples: o antebraço aponta para o cotovelo estimado (posição no mundo) e encolhe até ele; null = reto. */
-  apontarAntebraco(cotovelo: THREE.Vector3 | null): void;
+  /** IK simples: o antebraço aponta para o cotovelo estimado (posição no mundo) e encolhe ou estica até ele; null = reto.
+   *  maxEstica: até quantas vezes o antebraço pode esticar (o braço que estica para baixo do LUTCHA usa mais). */
+  apontarAntebraco(cotovelo: THREE.Vector3 | null, maxEstica?: number): void;
 }
 
 /** Antebraço que gira em volta do pulso: blocos (esticam até o cotovelo) + relógio (não estica, só acompanha). */
-function criarAntebraco(raiz: THREE.Group, comprimento: number, relogioZ: number): { grupo: THREE.Group; blocos: THREE.Group; apontar: (c: THREE.Vector3 | null) => void; relogioPai: THREE.Group } {
+function criarAntebraco(raiz: THREE.Group, comprimento: number, relogioZ: number): { grupo: THREE.Group; blocos: THREE.Group; apontar: (c: THREE.Vector3 | null, maxEstica?: number) => void; relogioPai: THREE.Group } {
   const grupo = new THREE.Group(); grupo.name = 'antebraco'; raiz.add(grupo);
   const blocos = new THREE.Group(); grupo.add(blocos);
   const relogioPai = new THREE.Group(); grupo.add(relogioPai);
   const eixo = new THREE.Vector3(0, 0, 1), alvo = new THREE.Vector3();
-  function apontar(cotovelo: THREE.Vector3 | null): void {
+  function apontar(cotovelo: THREE.Vector3 | null, maxEstica = 1.2): void {
     let s = 1;
     if (!cotovelo) grupo.quaternion.identity();
     else {
       raiz.updateWorldMatrix(true, false);
       alvo.copy(cotovelo); raiz.worldToLocal(alvo);
       const d = alvo.length();
-      if (d > 1e-4) { grupo.quaternion.setFromUnitVectors(eixo, alvo.multiplyScalar(1 / d)); s = THREE.MathUtils.clamp(d / comprimento, 0.35, 1.2); }
+      if (d > 1e-4) { grupo.quaternion.setFromUnitVectors(eixo, alvo.multiplyScalar(1 / d)); s = THREE.MathUtils.clamp(d / comprimento, 0.35, maxEstica); }
     }
     blocos.scale.set(1, 1, s);
-    relogioPai.position.z = (s - 1) * relogioZ; // o relógio desliza junto, sem amassar
+    relogioPai.position.z = (Math.min(s, 1.2) - 1) * relogioZ; // o relógio desliza junto, sem amassar
   }
   return { grupo, blocos, apontar, relogioPai };
 }

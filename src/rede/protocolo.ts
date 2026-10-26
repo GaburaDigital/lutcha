@@ -2,12 +2,15 @@
 // Posições em milímetros (inteiros de 16 bits: ±32 m), giros comprimidos. ~17 bytes por Piranbenja.
 // Todo pacote começa com a versão do formato: versões diferentes não conversam.
 //
-// Sigilo: a foto só tem número sorteado, posição, giro e duas marcas (voando, agarrado). Nunca quem é o original.
+// Sigilo: a foto só tem número sorteado, posição, giro e marcas (voando, agarrado, achatado, o que está fazendo).
+// Nunca quem é o original. O boneco solto (ragdoll) ainda não vai pela rede: o Quest vê só a pose do tronco.
 
-import type { EntradaUrso, Foto } from '../simulacao/luta';
+import { ESTADOS_IA, type EntradaUrso, type Foto } from '../simulacao/luta';
 
-export const VERSAO_FORMATO = 1;
+export const VERSAO_FORMATO = 2; // 2: marcas de estado do clone (rodada 2 do urso)
 const FOTO = 1, ENTRADA = 2;
+/** Distância máxima da pata à cabeça (m). Mais longe que isso, o PC recusa a posição da pata. */
+export const ALCANCE_MAXIMO = 3.2;
 const RODADAS = ['luta', 'fim'] as const;
 
 const mm = (v: number) => Math.max(-32767, Math.min(32767, Math.round(v * 1000)));
@@ -27,7 +30,8 @@ export function codificarFoto(f: Foto): ArrayBuffer {
     d.setUint16(o, p.numero); o += 2;
     d.setInt16(o, mm(p.pos.x)); o += 2; d.setInt16(o, mm(p.pos.y)); o += 2; d.setInt16(o, mm(p.pos.z)); o += 2;
     for (const c of p.rot) { d.setInt16(o, q16(c)); o += 2; }
-    d.setUint8(o++, (p.voando ? 1 : 0) | (p.agarrado ? 2 : 0));
+    // marcas: 1 voando · 2 agarrado · 4 achatado · 8 socar (se não, morder) · bits 4 a 7 = estado do clone
+    d.setUint8(o++, (p.voando ? 1 : 0) | (p.agarrado ? 2 : 0) | (p.achatado ? 4 : 0) | (p.ataque === 'socar' ? 8 : 0) | (Math.max(0, ESTADOS_IA.indexOf(p.estado)) << 4));
   }
   return buf;
 }
@@ -49,7 +53,9 @@ export function decodificarFoto(buf: ArrayBuffer): Foto | null {
     const rot: [number, number, number, number] = [0, 0, 0, 0];
     for (let k = 0; k < 4; k++) { rot[k] = d.getInt16(o) / 32767; o += 2; }
     const fl = d.getUint8(o++);
-    piranbenjas.push({ numero, pos, rot, voando: !!(fl & 1), agarrado: !!(fl & 2) });
+    const estado = ESTADOS_IA[fl >> 4] ?? 'andando';
+    const atacando = estado === 'armando' || estado === 'atacando';
+    piranbenjas.push({ numero, pos, rot, voando: !!(fl & 1), agarrado: !!(fl & 2), achatado: !!(fl & 4), estado, ataque: atacando ? (fl & 8 ? 'socar' : 'morder') : null, partes: null });
   }
   return { tick, tempo, escalaTempo, rodada, placar, urso, piranbenjas };
 }
@@ -83,10 +89,10 @@ export function decodificarEntrada(buf: ArrayBuffer): EntradaUrso | null {
   }
   const finito = [tamanhoPata, cabeca.x, cabeca.y, cabeca.z, ...(['esq', 'dir'] as const).flatMap((l) => [maos[l].pos.x, maos[l].pos.y, maos[l].pos.z])].every(Number.isFinite);
   if (!finito || tamanhoPata < 0.8 || tamanhoPata > 2.0) return null;
-  // a pata não pode estar longe da cabeça: alcance máximo de um urso de 2,7 m com braço esticado
+  // a pata não pode estar longe da cabeça: alcance máximo de um urso de 2,7 m com o braço esticando para baixo (até ~2,2×)
   for (const l of ['esq', 'dir'] as const) {
     const m = maos[l].pos;
-    if (Math.hypot(m.x - cabeca.x, m.y - cabeca.y, m.z - cabeca.z) > 2.6) maos[l].pos = { ...cabeca, y: cabeca.y - 0.8 };
+    if (Math.hypot(m.x - cabeca.x, m.y - cabeca.y, m.z - cabeca.z) > ALCANCE_MAXIMO) maos[l].pos = { ...cabeca, y: cabeca.y - 0.8 };
   }
   return { cabeca, maos, tamanhoPata };
 }

@@ -27,7 +27,9 @@ O PC e o Quest precisam estar **no mesmo Wi-Fi**. A internet só é usada para o
 
 **PC (Piranbenja):** W A S D anda · clique na tela e mova o mouse para girar · **J** ataque de dano · **K** ataque de impacto · **C** cria 2 clones (gasta água) · Esc solta o mouse. O anel no chão marca o original (só o PC vê).
 
-**Quest (UrsoBura):** mova os braços para socar e empurrar: com a mão aberta o golpe é de **dano**, com o punho fechado (gatilho + grip) é de **impacto** · aperte o **grip** perto de um Piranbenja para agarrar e solte no meio do movimento para arremessar · analógico esquerdo anda · analógico direito gira 30°. A resistência, a aura e o placar ficam no relógio do pulso esquerdo.
+**Quest (UrsoBura):** mova os braços para bater. Punho fechado (gatilho + grip) é **soco**: para frente empurra, de lado faz rolar, para cima é gancho e para baixo é martelada. Mão aberta é **arranhão** (de lado) ou **estocada** (reta para frente). Feche a mão devagar perto de um Piranbenja para **agarrar** e solte no meio do movimento para **arremessar**. Abaixo do ombro, o braço do urso estica para alcançar o chão. Analógico esquerdo anda, analógico direito gira 30°. Para ver resistência, aura e placar, olhe para o relógio no pulso esquerdo.
+
+**Solo contra os clones (teste do urso):** antes de entrar no VR, escolha na página como os clones agem (parados, andando à toa, cautelosos ou ofensivos), quantos são e se começam em formação (torre, pirâmide, muralha ou fila). Dentro do VR, **segure Y por 1 s** para pausar e mudar as opções.
 
 **Teste das patas:** **A** troca urso e Gabura, **B** engatilha o soco furadeira, **X** liga o sabre laser, **Y** carrega as agulhas, o analógico direito muda o tamanho da pata.
 
