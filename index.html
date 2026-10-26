@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LUTCHA!!! · Teste das patas</title>
+  <link rel="icon" href="data:,">
+  <style>
+    /* Tela do navegador: identidade Gaburaverso (fundo petróleo, Lima = ação, Aqua = informação). */
+    :root { --fundo: #0c1a24; --painel: #10232f; --linha: #2b5264; --texto: #e8f3f2; --texto2: #9fb8bf; --lima: #8fd651; --aqua: #4fd6d0; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto); font: 16px/1.5 "Nunito", system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr; }
+    header { padding: 14px 18px; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; border-bottom: 1px solid var(--linha); }
+    h1 { margin: 0; font-size: 1.3rem; font-weight: 800; }
+    h1 span { color: var(--aqua); font-weight: 700; }
+    .vr { background: var(--lima); color: #10230a; border: 0; border-radius: 999px; padding: 10px 20px; font: 800 1rem/1 inherit; cursor: pointer; }
+    .vr:disabled { opacity: .45; cursor: default; }
+    #avisoVR { margin: 0; color: var(--texto2); font-size: .9rem; flex: 1 1 260px; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; } }
+    #tela3d { position: relative; min-height: 0; }
+    #tela3d canvas { display: block; width: 100%; height: 100%; }
+    aside { padding: 16px 18px; border-left: 1px solid var(--linha); background: var(--painel); display: flex; flex-direction: column; gap: 14px; overflow: auto; }
+    aside h2 { margin: 0; font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--texto2); }
+    .botoes { display: flex; flex-wrap: wrap; gap: 8px; }
+    .botoes button { background: transparent; color: var(--texto); border: 1.5px solid var(--linha); border-radius: 999px; padding: 8px 13px; font: 700 .88rem/1 inherit; cursor: pointer; }
+    .botoes button:hover:not(:disabled) { border-color: var(--lima); }
+    .botoes button:disabled { opacity: .4; cursor: default; }
+    label { display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 8px; font-size: .9rem; }
+    input[type="range"] { accent-color: var(--lima); }
+    #estadoPC { margin: 0; font-size: .88rem; color: var(--texto2); }
+    table { border-collapse: collapse; font-size: .85rem; }
+    td { padding: 3px 8px 3px 0; vertical-align: top; }
+    td:first-child { color: var(--lima); font-weight: 700; white-space: nowrap; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--aqua); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LUTCHA!!! <span>· teste das patas</span></h1>
+    <button class="vr" id="entrarVR" type="button">Entrar no VR</button>
+    <p id="avisoVR">No Quest: aperte "Entrar no VR". As patas ficam nos controles e o painel à frente mostra os botões.</p>
+  </header>
+  <main>
+    <div id="tela3d"></div>
+    <aside>
+      <h2>No computador</h2>
+      <p id="estadoPC"></p>
+      <label for="gatilho">Gatilho <input type="range" id="gatilho" min="0" max="1" step="0.01" value="0"></label>
+      <label for="grip">Grip <input type="range" id="grip" min="0" max="1" step="0.01" value="0"></label>
+      <div class="botoes">
+        <button type="button" data-acao="A">Urso / humano</button>
+        <button type="button" data-acao="B" class="so-urso">Furadeira</button>
+        <button type="button" data-acao="X" class="so-urso">Sabre</button>
+        <button type="button" data-acao="Y" class="so-urso">Agulhas</button>
+        <button type="button" data-acao="analogicoD" class="so-urso">Cor do pelo</button>
+        <button type="button" data-acao="menor" class="so-urso">Pata −</button>
+        <button type="button" data-acao="maior" class="so-urso">Pata +</button>
+      </div>
+      <h2>No Quest</h2>
+      <table>
+        <tr><td>Gatilho, grip</td><td>dobram os dedos</td></tr>
+        <tr><td>A</td><td>urso ↔ Gabura (modo humano)</td></tr>
+        <tr><td>B</td><td>engatilha o soco furadeira (feche o punho para carregar)</td></tr>
+        <tr><td>X</td><td>sabre laser: pontas → nós dos dedos → desligado</td></tr>
+        <tr><td>Y</td><td>carga das agulhas: 3× → 6× → sem carga</td></tr>
+        <tr><td>Analógico D ↑↓</td><td>tamanho da pata (0,8× a 2,0×)</td></tr>
+        <tr><td>Analógico D ←→</td><td>gira 30°</td></tr>
+        <tr><td>Analógico E</td><td>anda</td></tr>
+        <tr><td>Clique analógico D</td><td>cor do pelo</td></tr>
+        <tr><td>Clique analógico E</td><td>mede a altura de novo</td></tr>
+      </table>
+    </aside>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

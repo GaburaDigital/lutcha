@@ -1,0 +1,24 @@
+{
+  "name": "lutcha",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "LUTCHA!!! UrsoBura VS Piranbenja: jogo de luta do Gaburaverso (Meta Quest 3S em WebXR contra PC).",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "qrcode": "node testes/gerar_qrcode.mjs"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.170.0",
+    "@types/webxr": "0.5.20",
+    "qrcode": "1.5.4",
+    "typescript": "5.7.3",
+    "vite": "6.0.7"
+  }
+}
