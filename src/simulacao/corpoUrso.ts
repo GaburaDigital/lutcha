@@ -64,9 +64,14 @@ export function esqueletoUrso(e: PoseUrso): EsqueletoUrso {
     { nome: 'cabeca', a: e.cabeca, b: e.cabeca, r: C.raioCabeca },
     { nome: 'tronco', a: soma(quadril, v(0, 0.05, 0)), b: peito, r: C.raioTronco },
   ];
+  // sentado no chão (a cabeça bem baixa, C20): as pernas saem esticadas para a frente, rentes ao chão
+  const sentado = Math.max(0, Math.min(1, (1.95 - yCab) / 0.35));
   for (const [nome, lado] of [['pernaE', -1], ['pernaD', 1]] as const) {
     const p = soma(base, vezes(direita, C.larguraPernas * lado));
-    segs.push({ nome, a: soma(p, v(0, C.raioPerna, 0)), b: soma(p, v(0, 0.95 * k, 0)), r: C.raioPerna });
+    const pe = soma(p, v(0, C.raioPerna, 0)), quadrilPerna = soma(p, v(0, 0.95 * k, 0));
+    const naFrente = soma(soma(p, vezes(frente, 0.95)), v(0, C.raioPerna, 0));
+    if (sentado <= 0) segs.push({ nome, a: pe, b: quadrilPerna, r: C.raioPerna });
+    else segs.push({ nome, a: soma(vezes(pe, 1 - sentado), vezes(naFrente, sentado)), b: soma(vezes(quadrilPerna, 1 - sentado), vezes(soma(p, v(0, C.raioPerna, 0)), sentado)), r: C.raioPerna });
   }
   const ombro = {} as Record<Lado, V3>, cotovelo = {} as Record<Lado, V3>, pata = {} as Record<Lado, V3>;
   const raioPata = C.raioPata * (e.tamanhoPata / 1.3);
@@ -123,4 +128,29 @@ export function baseDoSegmento(seg: Segmento, frente: V3): { u: V3; w: V3; vv: V
 /** Zona do urso para mostrar e para os efeitos (perna, braço, pata, tronco, cabeça). */
 export function zonaDoSegmento(nome: SegUrso): 'cabeca' | 'tronco' | 'braco' | 'pata' | 'perna' {
   return nome.startsWith('perna') ? 'perna' : nome.startsWith('pata') ? 'pata' : nome.startsWith('braco') || nome.startsWith('antebraco') ? 'braco' : nome === 'cabeca' ? 'cabeca' : 'tronco';
+}
+
+/** Cápsula em pé (eixo de a até b, raio r): um Piranbenja, para a pata parar na superfície dele. */
+export interface CapsulaPB { a: V3; b: V3; r: number }
+
+/** Pata que para na superfície (C22): o braço do urso não empurra ninguém; se o controle vai para dentro de um
+ *  Piranbenja, a pata fica encostada nele, do lado de onde veio (no Quest, a mão de verdade aparece como contorno).
+ *  Só os golpes (pata rápida) mexem nos Piranbenjas. */
+export function pataNaSuperficie(antes: V3 | null, alvo: V3, raioPata: number, capsulas: CapsulaPB[]): V3 {
+  let q = { ...alvo };
+  for (let volta = 0; volta < 3; volta++) {
+    let mexeu = false;
+    for (const c of capsulas) {
+      const R = c.r + raioPata;
+      const { q: e } = pertoNoSegmento(q, c.a, c.b), d = tam(menos(q, e));
+      if (d >= R - 1e-4) continue;
+      // sai pelo lado de onde a pata veio (não atravessa o Piranbenja de uma vez)
+      let n = menos(q, e);
+      if (antes) { const { q: ea } = pertoNoSegmento(antes, c.a, c.b), da = menos(antes, ea); if (tam(da) > R * 0.5) n = da; }
+      if (tam(n) < 1e-4) n = v(0, 1, 0);
+      q = soma(e, vezes(unit(n), R)); mexeu = true;
+    }
+    if (!mexeu) break;
+  }
+  return q;
 }

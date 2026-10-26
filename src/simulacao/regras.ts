@@ -107,6 +107,73 @@ export const EQUILIBRIO = {
   armar: 0.75,                  // s de aviso antes de atacar (original e clones)
   esperaSalvaVidas: 8,          // s entre dois "clones salva-vidas"
 };
+
+// ---------------- o urso apanhando (C20–C23) ----------------
+/** Empurrão de UM soco no urso (m/s), pela resistência dele (0 a 1): 100 → 0,8 · 50 → 2,0 · 20 → 3,7 · 10 → 4,5 · 0 → 5,4.
+ *  Acima de EQUILIBRIO.decolarUrso (4 m/s) ele decola: com resistência 10 ou menos, um soco sozinho já decola um pouco. */
+export function empurraoNoUrso(res01: number): number {
+  const r = Math.max(0, Math.min(1, res01));
+  return 0.8 + 4.6 * (1 - r) * (1 - r);
+}
+/** Decolagem proporcional: perto do limite é um pulinho (~50 cm); quanto mais passa, maior o arco. */
+export function velocidadeDeDecolagem(L: number, dirX: number, dirZ: number, subida = 0): V3 {
+  const sobra = Math.max(0, L - EQUILIBRIO.decolarUrso);
+  const vy = Math.min(7.5, 3.1 + 0.8 * sobra + subida), h = (1.5 + 1.0 * sobra) * (1 - Math.min(0.7, subida * 0.25));
+  return { x: dirX * h, y: vy, z: dirZ * h };
+}
+/** O que cada parte do urso faz quando leva impacto: perna enche a barra de equilíbrio (cai sentado),
+ *  barriga empurra, cabeça deixa tonto 1 s, braço e pata empurram menos (é quase uma defesa). */
+export const URSO_APANHANDO = {
+  equilibrioPorImpacto: 25,     // pontos por impacto na perna com resistência 100 (×3 com resistência 0)
+  equilibrioPorTapa: 6,         // tapa e mordida na perna desequilibram pouco
+  equilibrioCai: 100,
+  equilibrioVolta: 15,          // pontos por segundo que a barra esvazia (depois de 1 s sem levar nada na perna)
+  sentado: 2.0,                 // s sentado no chão: não anda, patas mais fracas, leva o dobro
+  forcaSentado: 0.5, impactoSentado: 2,
+  tonto: 1.0,                   // s tonto depois de impacto na cabeça (não agarra)
+  empurraoPerna: 0.4, empurraoBraco: 0.6, empurraoCabeca: 0.8,
+  correnteEquilibrio: 40,       // pontos por segundo com a corrente enrolada na perna
+};
+
+// ---------------- ataques de impacto do Piranbenja (roda do mouse) ----------------
+export type AtaqueImpacto = 'soco' | 'cabecada' | 'chute';
+/** armar: s de aviso · forca: × do soco · subida: quanto vai para cima · caido: s deitado depois (vulnerável). */
+export const ATAQUES_IMPACTO: Record<AtaqueImpacto, { armar: number; forca: number; subida: number; caido: number; alcance: number }> = {
+  soco:     { armar: 0.75, forca: 1.0, subida: 0,   caido: 0,   alcance: 0.32 },
+  cabecada: { armar: 0.5,  forca: 0.8, subida: 2.2, caido: 0,   alcance: 0.32 },
+  chute:    { armar: 1.0,  forca: 2.2, subida: 0,   caido: 1.5, alcance: 0.42 },
+};
+
+// ---------------- formações (C21–C23) ----------------
+export type TipoFormacao = 'muralha' | 'catapulta' | 'torre' | 'piramide' | 'corrente' | 'fila';
+export const TIPOS_FORMACAO: TipoFormacao[] = ['muralha', 'catapulta', 'torre', 'piramide', 'corrente', 'fila'];
+/** clones: quantos precisa (fila aceita de 3 a 5) · minimo: abaixo disso, depois de puxões, desfaz (sem strike) ·
+ *  montar: s em que fica vulnerável (um golpe do urso desmancha como strike) · res: resistência da formação inteira. */
+export const FORMACOES: Record<TipoFormacao, { clones: number; maximo: number; minimo: number; montar: number; res: number }> = {
+  muralha:   { clones: 4, maximo: 4, minimo: 3, montar: 1.0, res: 30 },
+  catapulta: { clones: 2, maximo: 2, minimo: 2, montar: 1.2, res: 10 },
+  torre:     { clones: 3, maximo: 3, minimo: 2, montar: 1.5, res: 30 },
+  piramide:  { clones: 6, maximo: 6, minimo: 4, montar: 2.5, res: 50 },
+  corrente:  { clones: 4, maximo: 4, minimo: 3, montar: 1.2, res: 20 },
+  fila:      { clones: 3, maximo: 5, minimo: 2, montar: 0.8, res: 20 },
+};
+/** Clones que entram numa formação: os mais perto do original, até esta distância (m). */
+export const ALCANCE_FORMAR = 4;
+/** Catapulta: ângulo de saída e distância que a mira alcança (m). Sem aviso e sem câmera lenta (C23). */
+export const CATAPULTA = { angulo: (40 * Math.PI) / 180, minimo: 2, maximo: 9, forcaProjetil: 1.5, recarga: 2.5, subir: 0.4 };
+/** Escalar a torre ou a pirâmide (s). */
+export const ESCALAR = 0.6;
+
+/** Velocidade de saída da catapulta para cair a "distancia" metros (no chão), no ângulo da catapulta. */
+export function saidaCatapulta(giro: number, distancia: number): V3 {
+  const d = Math.max(CATAPULTA.minimo, Math.min(CATAPULTA.maximo, distancia));
+  const v = Math.sqrt((d * 9.81) / Math.sin(2 * CATAPULTA.angulo));
+  const h = v * Math.cos(CATAPULTA.angulo);
+  return { x: -Math.sin(giro) * h, y: v * Math.sin(CATAPULTA.angulo), z: -Math.cos(giro) * h };
+}
+
+/** Mão meio fechada (grip apertado, gatilho solto) não golpeia: só agarra (C22). Arranhão e estocada só com a mão aberta. */
+export function maoMeioFechada(gatilho: number, grip: number): boolean { return grip >= 0.5 && gatilho < 0.6; }
 /** Raspão atordoa só um instante. */
 export const ATORDOA_RASPAO = 0.3;
 /** Martelada prende o Piranbenja achatado no chão por este tempo (e pega só um por vez). */

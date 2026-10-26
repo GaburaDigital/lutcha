@@ -5,6 +5,8 @@
 // Jeitos (C16): parado (boneco de treino), bobo (anda à toa, patadas lentas que erram, nunca agarra)
 // e ofensivo (vai atrás do Piranbenja mais perto, usa todos os golpes, agarra e arremessa para longe,
 // sacode o braço ou arranca com a outra pata os clones grudados).
+// C20–C23: cai sentado (barra de equilíbrio cheia), fica tonto (não agarra), esbarra nas formações e,
+// ofensivo, tenta rebater com um soco quem vem voando da catapulta.
 
 import { eixosDoGiro, soma, menos, vezes, unit, tam, v, type Lado } from './corpoUrso';
 import { RINGUE, type V3 } from './regras';
@@ -13,7 +15,7 @@ export type JeitoUrso = 'parado' | 'bobo' | 'ofensivo';
 type Acao = 'soco' | 'socoLateral' | 'gancho' | 'martelada' | 'arranhao' | 'estocada' | 'agarrar' | 'sacudir';
 
 export interface VisaoDoBot {
-  piranbenjas: { numero: number; pos: V3; grudadoEm: string | null; agarrado: boolean; derrubado: boolean }[];
+  piranbenjas: { numero: number; pos: V3; vel: V3; grudadoEm: string | null; agarrado: boolean; derrubado: boolean; projetil: boolean }[];
   segurando: Record<Lado, number | null>;
   lentidao: number; // 0 a 1: cada clone grudado deixa 5% mais lento
 }
@@ -32,24 +34,33 @@ export class UrsoBot {
   private empurrao = v(0, 0, 0);       // escorrega depois de levar soco
   private voo: V3 | null = null;       // velocidade enquanto voa (decolou)
   private altura = 0;                  // quanto está acima do chão (ou abaixo, se caiu fora do ringue)
+  private sentadoAte = 0;              // caiu sentado: não anda nem ataca
+  private abaixar = 0;                 // quanto a cabeça desce sentado (m)
+  private tontoAte = 0;
+  private rebatidos = new Set<number>();
 
   constructor(public jeito: JeitoUrso, private aleatorio: () => number) {
     this.maos = { esq: { pos: this.descanso('esq', 0), gatilho: 0, grip: 0 }, dir: { pos: this.descanso('dir', 0), gatilho: 0, grip: 0 } };
   }
 
-  reiniciar(): void { this.x = 0; this.z = 3; this.giro = 0; this.plano = null; this.esperaAte = this.tempo + 1; this.alvoAndar = null; this.voo = null; this.altura = 0; this.empurrao = v(0, 0, 0); }
+  reiniciar(): void { this.x = 0; this.z = 3; this.giro = 0; this.plano = null; this.esperaAte = this.tempo + 1; this.alvoAndar = null; this.voo = null; this.altura = 0; this.empurrao = v(0, 0, 0); this.sentadoAte = 0; this.abaixar = 0; this.tontoAte = 0; this.rebatidos.clear(); }
+  /** Barra de equilíbrio cheia: senta no chão (a cabeça desce ~0,9 m). */
+  sentar(segundos: number): void { this.sentadoAte = this.tempo + segundos; this.plano = null; }
+  tonto(segundos: number): void { this.tontoAte = this.tempo + segundos; }
+  /** Esbarrou numa formação: volta um pouco (não atravessa). */
+  deslocar(dx: number, dz: number): void { this.x += dx; this.z += dz; }
 
   /** Levou soco: escorrega um pouco (perde força aos poucos). */
   empurrar(vx: number, vz: number): void { this.empurrao = soma(this.empurrao, v(vx, 0, vz)); }
   /** Decolou: voa em arco; no ar não ataca; se cair fora do ringue, continua caindo. */
-  decolar(vel: V3): void { this.voo = { ...vel }; this.plano = null; }
+  decolar(vel: V3): void { this.voo = { ...vel }; this.plano = null; this.sentadoAte = 0; }
   get noAr(): boolean { return !!this.voo; }
 
   /** Onde a pata descansa: na frente da barriga, um pouco para o lado, balançando com a respiração. */
   private descanso(l: Lado, t: number): V3 {
     const { frente, direita } = eixosDoGiro(this.giro), lado = l === 'esq' ? -1 : 1;
     const resp = Math.sin(t * 2 + (lado > 0 ? 0.6 : 0)) * 0.03 + (this.voo ? 0.9 : 0); // no ar, braços para cima
-    return soma(soma(v(this.x, 1.15 + resp + this.altura, this.z), vezes(direita, 0.62 * lado)), vezes(frente, 0.25));
+    return soma(soma(v(this.x, 1.15 + resp + this.altura - this.abaixar * 0.8, this.z), vezes(direita, 0.62 * lado)), vezes(frente, 0.25));
   }
 
   passo(dt: number, tempo: number, visao: VisaoDoBot): SaidaBot {
@@ -63,10 +74,13 @@ export class UrsoBot {
       const dentro = Math.hypot(this.x, this.z) <= RINGUE.raio;
       if (this.altura <= 0 && dentro) { this.altura = 0; this.voo = null; this.esperaAte = tempo + 0.8; }
       else if (!dentro && this.altura < -6) this.voo.y = 0; // já caiu bem fora: para de calcular
-    } else if (this.jeito !== 'parado') this.decidir(visao, veloz, dt);
+    } else if (this.jeito !== 'parado' && tempo >= this.sentadoAte) this.decidir(visao, veloz, dt);
+    const querAbaixar = tempo < this.sentadoAte ? 0.9 : 0;
+    this.abaixar += (querAbaixar - this.abaixar) * Math.min(1, dt * 8);
     this.moverMaos(dt, visao);
     const bob = this.jeito === 'parado' ? 0 : Math.sin(tempo * 5) * 0.015;
-    return { cabeca: v(this.x, 2.45 + bob + this.altura, this.z), giro: this.giro, maos: { esq: { ...this.maos.esq, pos: { ...this.maos.esq.pos } }, dir: { ...this.maos.dir, pos: { ...this.maos.dir.pos } } }, tamanhoPata: 1.3 };
+    const tonto = tempo < this.tontoAte ? Math.sin(tempo * 9) * 0.06 : 0;
+    return { cabeca: v(this.x + tonto, 2.45 + bob + this.altura - this.abaixar, this.z), giro: this.giro, maos: { esq: { ...this.maos.esq, pos: { ...this.maos.esq.pos } }, dir: { ...this.maos.dir, pos: { ...this.maos.dir.pos } } }, tamanhoPata: 1.3 };
   }
 
   private virarPara(p: V3, dt: number, rapidez = 2.5): number {
@@ -101,6 +115,16 @@ export class UrsoBot {
       }
       return;
     }
+    // ofensivo: quem vem voando da catapulta, tenta rebater com um soco na hora certa (às vezes erra)
+    const vindo = visao.piranbenjas.find((p) => p.projetil && !this.rebatidos.has(p.numero) && Math.hypot(p.pos.x - this.x, p.pos.z - this.z) < 3.2
+      && (p.vel.x * (this.x - p.pos.x) + p.vel.z * (this.z - p.pos.z)) > 0);
+    if (vindo) {
+      this.rebatidos.add(vindo.numero);
+      if (this.aleatorio() < 0.55) {
+        const t = 0.4, previsto = v(vindo.pos.x + vindo.vel.x * t, vindo.pos.y + vindo.vel.y * t - 4.9 * t * t, vindo.pos.z + vindo.vel.z * t);
+        this.virarPara(previsto, 1, 10); this.golpe('soco', { numero: vindo.numero, pos: previsto }, 9, 0.05); return;
+      }
+    }
     // ofensivo: primeiro se livra de quem está grudado nele
     const grudados = visao.piranbenjas.filter((p) => p.grudadoEm);
     if (grudados.length && this.tempo > this.esperaAte) {
@@ -117,7 +141,8 @@ export class UrsoBot {
     if (this.tempo < this.esperaAte || erro > 0.5) return;
     this.esperaAte = this.tempo + 0.5 + this.aleatorio() * 0.7;
     const r = this.aleatorio();
-    const acao: Acao = r < 0.3 ? 'agarrar' : r < 0.46 ? 'soco' : r < 0.57 ? 'socoLateral' : r < 0.68 ? 'gancho' : r < 0.77 ? 'martelada' : r < 0.9 ? 'arranhao' : 'estocada';
+    const tonto = this.tempo < this.tontoAte; // tonto não agarra
+    const acao: Acao = r < 0.3 && !tonto ? 'agarrar' : r < 0.3 ? 'soco' : r < 0.46 ? 'soco' : r < 0.57 ? 'socoLateral' : r < 0.68 ? 'gancho' : r < 0.77 ? 'martelada' : r < 0.9 ? 'arranhao' : 'estocada';
     if (acao === 'agarrar') this.agarrar(alvo, this.aleatorio() < 0.5 ? 'esq' : 'dir', false);
     else this.golpe(acao, alvo, 8, 0.1);
   }

@@ -18,7 +18,7 @@ with servidor(), sync_playwright() as p:
     pg.goto(URL + '?modo=pcsolo&urso=parado&clones=parados&iniciais=2'); pg.wait_for_function('() => window.__teste && window.__teste.luta', timeout=60000)
     time.sleep(1.5)
     confere('PC solo abre sem rede', J(pg, 'return t.canal') is None and J(pg, 'return t.luta.foto().piranbenjas.length') == 3)
-    confere('faixa de teclas com 8 teclas', pg.locator('.tecla').count() == 8, pg.locator('.tecla').count())
+    confere('faixa de teclas com 10 teclas', pg.locator('.tecla').count() == 10, pg.locator('.tecla').count())
     # original perto da perna do urso, olhando para ele
     J(pg, 't.luta.testeColocar(t.luta.numeroDoOriginal(), { x: -0.3, y: 0.47, z: 2.6 })'); time.sleep(0.5)
     pg.keyboard.press('j')
@@ -56,6 +56,34 @@ with servidor(), sync_playwright() as p:
     pg.screenshot(path=F + 'pc_05_pausa.png')
     pg.select_option('#cfgUrso', 'bobo'); pg.click('#recomecar'); time.sleep(0.5)
     confere('recomeçar com o urso bobo', J(pg, 'return t.luta.opcoes.ursoBot') == 'bobo' and J(pg, 'return t.pausado') is False)
+    # ---------- batalha (C20–C23) ----------
+    pg.goto(URL + '?modo=pcsolo&urso=parado&clones=parados&iniciais=4'); pg.wait_for_function('() => window.__teste && window.__teste.luta', timeout=60000)
+    time.sleep(1)
+    # roda do mouse troca o ataque do clique direito
+    pg.mouse.move(500, 300); pg.mouse.wheel(0, 120); time.sleep(0.2)
+    confere('roda do mouse troca para cabeçada', J(pg, 'return t.impacto') == 'cabecada' and 'Cabeçada' in pg.inner_text('#tk-soco'), pg.inner_text('#tk-soco'))
+    pg.mouse.wheel(0, 120); time.sleep(0.2)
+    confere('roda do mouse: chute', J(pg, 'return t.impacto') == 'chute')
+    # roda das formações: segurar F abre; a catapulta (2 clones) monta na frente do original
+    J(pg, "const o = t.luta.numeroDoOriginal(); t.luta.testeColocar(o, { x: 0, y: 0.47, z: -2 }); t.luta.testeNumeros().filter(n => n !== o).forEach((n, i) => t.luta.testeColocar(n, { x: -1.2 + i * 0.8, y: 0.47, z: -1.2 }))")
+    pg.keyboard.down('f'); time.sleep(0.4)
+    aberta = pg.locator('#roda').is_visible(); pg.screenshot(path=F + 'pc_06_roda_formacoes.png')
+    J(pg, "t.roda.escolha = 'catapulta'"); pg.keyboard.up('f'); avancar(pg, 90); time.sleep(0.3)
+    unid = J(pg, 'return t.luta.testeUnidades()')
+    confere('F abre a roda e monta a catapulta', aberta and len(unid) == 1 and unid[0]['tipo'] == 'catapulta' and unid[0]['montada'], unid)
+    # aviso do Espaço só quando dá: perto da catapulta aparece "subir na catapulta"
+    sem = J(pg, 'return t.avisoEspaco')
+    J(pg, 't.luta.testeColocar(t.luta.numeroDoOriginal(), { x: 0.6, y: 0.47, z: 0 })'); avancar(pg, 2); time.sleep(0.4)
+    com = J(pg, 'return t.avisoEspaco')
+    confere('aviso do Espaço aparece só perto da catapulta', sem == '' and 'catapulta' in com, {'longe': sem, 'perto': com})
+    pg.keyboard.press(' '); avancar(pg, 40); time.sleep(0.5)
+    pg.screenshot(path=F + 'pc_07_catapulta_mira.png')
+    confere('Espaço sobe na catapulta e mostra o arco da mira', J(pg, 'return t.arcoVisivel') is True and 'clique' in J(pg, 'return t.avisoEspaco').lower(), J(pg, 'return t.avisoEspaco'))
+    J(pg, "t.luta.controle.atacar = 'soco'"); ev = avancar(pg, 3)
+    confere('clique lança da catapulta', any(e.startswith('catapulta') for e in ev), ev)
+    # onomatopeia: o quadro do texto é medido pela palavra
+    m = J(pg, "return [t.medirOnomatopeia('SOCO LATERAL!'), t.medirOnomatopeia('PAF!')]")
+    confere('onomatopeia longa não corta (quadro medido)', m[0]['largura'] > 560 and m[1]['largura'] < m[0]['largura'], m)
     reais = [e for e in erros if 'GPU stall' not in e and 'WebGL' not in e and 'pointer' not in e.lower()]
     if reais: print('erros no console:', reais[:5]); falhas.append('console')
     b.close()

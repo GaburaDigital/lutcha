@@ -29,3 +29,10 @@ Agora dá para jogar de Piranbenja sozinho no computador, contra um UrsoBura con
 ## 26/10/2026 — Agora o urso voa
 
 Depois de jogar com uma criança de verdade, o UrsoBura parecia impossível de derrotar. Os tapas e as mordidas ficaram mais fortes, a água enche mais rápido e o urso anda mais devagar. Três socos juntos num urso cansado fazem ele decolar num arco de anime, em câmera lenta, e quem joga no óculos voa junto. Também nasceram as armadilhas de morder, o clone salva-vidas (criar clones enquanto cai do ringue te traz de volta) e um truque para confundir o urso: ao criar clones, as estrelinhas de tontura do original passam para um clone.
+
+## 26/10/2026 — O Piranbenja também pode vencer
+
+O urso continuava forte demais, então a luta mudou de novo. Quanto mais cansado o urso, mais longe um soco o empurra, e um urso bem fraquinho decola com um soco só. Pancadas nas pernas fazem ele cair sentado, na cabeça deixam tonto, e se ele estiver no ar, dá para mantê-lo voando no malabarismo. O Piranbenja ganhou cabeçada e chute com as duas pernas, e os clones agora montam formações: muralha, torre, pirâmide, corrente que enrola na perna do urso, fila que investe em trenzinho e uma catapulta que lança Piranbenjas no urso. Do outro lado, o urso pode rebater quem vem voando com um soco na hora certa. E as palavras que aparecem nos golpes não saem mais cortadas.
+
+![Teste do Piranbenja: a roda das formações e a mira da catapulta](docs/diario/2026-10-26_formacoes.png)
+

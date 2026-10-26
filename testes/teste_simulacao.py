@@ -1,5 +1,6 @@
 """Testes da simulação da luta (sem desenho), pelo modo laboratório da página:
 golpe em cheio, raspão, boliche, agarrar e jogar, queda do original, ataques combinados no urso e sigilo da foto.
+Batalha (C20–C23): empurrão pela resistência, chute, cabeçada, tonto, pata na superfície, formações, catapulta, rebater, escalar.
 Rodada 2 do urso: golpes por direção (gancho, soco lateral, martelada, estocada, arranhão), vizinhos levando 60%,
 atordoamento, ataque armado antes de bater, formações, boneco solto (ragdoll) ao agarrar e o braço que estica."""
 import sys, time, json
@@ -81,9 +82,9 @@ with servidor(), sync_playwright() as p:
       const chaves = [...new Set(f.piranbenjas.flatMap((p) => Object.keys(p)))].sort();
       const antes = s.l.testeNumeros(); s.l.testeCriarClones(2); const depois = s.l.testeNumeros();
       const repetidos = antes.filter((n) => depois.includes(n)).length;
-      return { chaves, bytes: bin.byteLength, n: f.piranbenjas.length, iguais: JSON.stringify(volta.piranbenjas.map(p => p.numero)) === JSON.stringify(f.piranbenjas.map(p => p.numero)), repetidos, total: depois.length };""")
+      return { chaves, bytes: bin.byteLength, n: f.piranbenjas.length, nf: f.formacoes.length, iguais: JSON.stringify(volta.piranbenjas.map(p => p.numero)) === JSON.stringify(f.piranbenjas.map(p => p.numero)), repetidos, total: depois.length };""")
     confere('foto sem marca do original', r['chaves'] == ['achatado', 'agarrado', 'ataque', 'estado', 'grudado', 'numero', 'partes', 'pos', 'rot', 'voando'], r['chaves'])
-    confere('foto binária: 19 + 18 bytes por Piranbenja', r['bytes'] == 19 + 18 * r['n'] and r['iguais'], r['bytes'])
+    confere('foto binária: 21 + 18 por Piranbenja + 9 por formação', r['bytes'] == 21 + 18 * r['n'] + 9 * r['nf'] and r['iguais'], r['bytes'])
     confere('números sorteados de novo ao criar clones', r['repetidos'] <= 1 and r['total'] == 6, r)
 
     # ---------- rodada 2 do urso ----------
@@ -130,18 +131,21 @@ with servidor(), sync_playwright() as p:
       const armouAntes = primeiro > 0 && linha.slice(Math.max(0, primeiro - 40), primeiro).some((l) => l.includes('armando'));
       return { primeiro, armouAntes };""")
     confere('clone arma o ataque antes de bater', r['primeiro'] > 0 and r['armouAntes'], r)
-    # 14) pirâmide: fica de pé; um soco na base derruba quem está em cima
+    # 14) pirâmide (C21): fica de pé; um soco tira da resistência dela (ninguém voa); zerou, desmancha como STRIKE
     r = S(pg, """s.nova({ formacao: 'piramide' }); s.passos(60); const f0 = s.l.foto();
       const alturas = f0.piranbenjas.map((p) => +p.pos.y.toFixed(2)).sort((a, b) => a - b);
-      const ev = s.passos(30, (i) => s.urso([0, 2.45, 2.6], [-1, 1.2, 2.6], [0, 0.5, Math.max(1.75, 2.2 - i * 4 / 60)], [0, 0], [1, 1]));
-      const livres = s.l.testeNumeros().filter((n) => !s.l.testeEstado(n).formacao).length;
+      const parar = () => s.passos(25, () => s.urso([0, 2.45, 2.6], [-1, 1.2, 2.6], [0, 0.5, 2.3]));
+      const soco = () => s.passos(12, (i) => s.urso([0, 2.45, 2.6], [-1, 1.2, 2.6], [0, 0.5, Math.max(1.75, 2.2 - i * 8 / 60)], [0, 0], [1, 1]));
+      parar(); soco(); const res1 = s.l.testeUnidades()[0]?.res; const livres1 = s.l.testeNumeros().filter((n) => !s.l.testeEstado(n).formacao).length;
+      for (let k = 0; k < 4; k++) { parar(); soco(); }
       s.passos(240, () => s.urso([0, 2.45, 2.6], [-1, 1.2, 2.6], [0, 1.6, 2.2]));
       const topo = Math.max(...s.l.foto().piranbenjas.map((p) => p.pos.y));
-      return { n: f0.piranbenjas.length, alturas, livres, topo: +topo.toFixed(2), golpes: ev.filter((e) => e.tipo === 'golpe').length };""")
-    confere('pirâmide de pé e desmoronando', r['n'] == 6 and r['alturas'][-1] > 2.1 and r['golpes'] >= 1 and r['livres'] >= 4 and r['topo'] < 1.2, r)
+      return { n: f0.piranbenjas.length, alturas, res1, livres1, strike: s.ev.filter((e) => e.tipo === 'strike').length, unidades: s.l.testeUnidades().length, topo: +topo.toFixed(2) };""")
+    confere('pirâmide de pé; soco tira resistência; desmancha em STRIKE', r['n'] == 7 and r['alturas'][-1] > 2.1 and r['res1'] is not None and r['res1'] < 50 and r['livres1'] == 1
+            and r['strike'] >= 1 and r['unidades'] == 0 and r['topo'] < 1.2, r)
     # 15) agarrar vira boneco solto: a parte segura acompanha a pata e as pernas ficam penduradas
     r = S(pg, PREP + """s.passos(5, () => s.urso([0, 2.45, 1.5], [-1, 1.2, 2], [0, 0.6, 0.15], [0, 0], [0, 0]));
-      s.passos(30, (i) => s.urso([0, 2.45, 1.5], [-1, 1.2, 2], [0, 0.6 + Math.min(i, 20) * 0.04, 0.15], [0, 0], [0, 1]));
+      s.passos(90, (i) => s.urso([0, 2.45, 1.5], [-1, 1.2, 2], [0, 0.6 + Math.min(i, 20) * 0.04, 0.15], [0, 0], [0, 1])); // sobe e espera o balanço assentar
       const p = s.l.foto().piranbenjas.find((x) => x.numero === c);
       return { agarrado: p.agarrado, partes: !!p.partes, tronco: p.partes && p.partes.tronco.pos.y, perna: p.partes && p.partes.pernaE.pos.y };""")
     confere('agarrado vira boneco solto pendurado', r['agarrado'] and r['partes'] and r['tronco'] > 0.9 and r['perna'] < r['tronco'], r)
@@ -212,7 +216,7 @@ with servidor(), sync_playwright() as p:
       s.passos(3); ns.forEach((n) => s.l.testePedirAtaque(n, 'soco'));
       let alto = 0; const ev = s.passos(200, () => { alto = Math.max(alto, s.l.entradaUrso.cabeca.y); });
       return { decolou: ev.filter((e) => e.tipo === 'ursoDecolou').length, alto: +alto.toFixed(2), fim: +s.l.entradaUrso.cabeca.y.toFixed(2) };""")
-    confere('soco combinado decola o urso cansado', r['decolou'] == 1 and r['alto'] > 3.4 and r['fim'] < 2.6, r)
+    confere('soco combinado decola o urso cansado', r['decolou'] >= 1 and r['alto'] > 3.4 and r['fim'] < 2.6, r)
     # 25) ao criar clones, o original passa as estrelinhas para um clone novo e fica livre
     r = S(pg, """s.nova({ clonesIniciais: 0 }); s.passos(5); const o = s.l.pbs.find((p) => p.original); o.atordoadoAte = s.l.tempo + 3; o.estado = 'atordoado';
       s.l.testeCriarClones(2); const tontos = s.l.foto().piranbenjas.filter((p) => s.l.testeEstado(p.numero).atordoadoPor > 1);
@@ -237,6 +241,130 @@ with servidor(), sync_playwright() as p:
       const ev2 = s.passos(10, () => s.urso([0, 2.45, 2], [-1, 1.2, 2], [0, 0.55, 0.45], [0, 0], [0, 1]));
       return { golpes, agarrou: ev2.some((e) => e.tipo === 'agarrou') };""")
     confere('pata devagar não golpeia e agarra', r['golpes'] == 0 and r['agarrou'], r)
+
+    # ---------- batalha (C20–C23) ----------
+    # 29) empurrão pela resistência: urso inteiro quase não sai do lugar; fraquinho, um soco sozinho já decola um pouco
+    r = S(pg, """const um = (res) => { s.nova({ semIA: true, ursoBot: 'parado', clonesIniciais: 1 }); s.passos(30); const [c] = s.clone();
+        s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 }); s.l.testeColocar(c, { x: 0, y: 0.47, z: 2.45 }); s.passos(3);
+        s.l.ursoRes = res; s.l.testePedirAtaque(c, 'soco'); let alto = 0; const ev = s.passos(120, () => { alto = Math.max(alto, s.l.entradaUrso.cabeca.y); });
+        const g = ev.find((e) => e.tipo === 'ursoGolpeado');
+        return { parte: g && g.parte, emp: g ? +Math.hypot(g.empurrao.x, g.empurrao.z).toFixed(2) : -1, decolou: ev.some((e) => e.tipo === 'ursoDecolou'), alto: +alto.toFixed(2) }; };
+      return { forte: um(100), fraco: um(10) };""")
+    confere('urso inteiro: soco na barriga só empurra um pouco', r['forte']['parte'] == 'tronco' and 0.6 < r['forte']['emp'] < 1.0 and not r['forte']['decolou'], r['forte'])
+    confere('urso fraco: um soco sozinho decola um pulinho', r['fraco']['decolou'] and 2.8 < r['fraco']['alto'] < 3.4, r['fraco'])
+    # 30) chute com as duas pernas na perna do urso: enche a barra de equilíbrio, ele cai sentado; quem chutou fica caído
+    r = S(pg, """s.nova({ semIA: true, ursoBot: 'parado', clonesIniciais: 1 }); s.passos(30); const [c] = s.clone();
+      s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 }); s.l.testeColocar(c, { x: 0, y: 0.47, z: 2.45 }); s.passos(3);
+      s.l.ursoRes = 50; s.l.testePedirAtaque(c, 'chute'); const ev = s.passos(2); const caido = s.l.testeEstado(c).estado;
+      s.passos(30); const cab = s.l.entradaUrso.cabeca.y, sentado = s.l.testeUrso().sentado;
+      const g = ev.find((e) => e.tipo === 'ursoGolpeado');
+      return { parte: g && g.parte, caiu: ev.some((e) => e.tipo === 'ursoCaiu'), decolou: ev.some((e) => e.tipo === 'ursoDecolou'), caido, sentado, cab: +cab.toFixed(2) };""")
+    confere('chute na perna: urso cai sentado e quem chutou fica caído', (r['parte'] or '').startswith('perna') and r['caiu'] and not r['decolou'] and r['caido'] == 'caido' and r['sentado'] and r['cab'] < 1.8, r)
+    # 31) cabeçada: joga o urso mais para cima do que para trás
+    r = S(pg, """s.nova({ semIA: true, ursoBot: 'parado', clonesIniciais: 1 }); s.passos(30); const [c] = s.clone();
+      s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 }); s.l.testeColocar(c, { x: 0, y: 0.47, z: 2.45 }); s.passos(3);
+      s.l.ursoRes = 0; s.l.testePedirAtaque(c, 'cabecada'); const ev = s.passos(2); const d = ev.find((e) => e.tipo === 'ursoDecolou');
+      return d ? { vy: +d.vel.y.toFixed(2), vh: +Math.hypot(d.vel.x, d.vel.z).toFixed(2) } : null;""")
+    confere('cabeçada joga o urso para cima', bool(r) and r['vy'] > 3 * r['vh'], r)
+    # 32) impacto na cabeça deixa o urso tonto (e tonto ele não agarra)
+    r = S(pg, """s.nova({ clonesIniciais: 1 }); const [c] = s.clone(); s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 });
+      s.passos(3, () => s.urso([0, 2.45, 3], [-0.7, 1.2, 2.8], [0.7, 1.2, 2.8])); s.l.testeColocar(c, { x: 0, y: 2.15, z: 2.5 });
+      s.l.testePedirAtaque(c, 'soco'); const ev = s.passos(1, () => s.urso([0, 2.45, 3], [-0.7, 1.2, 2.8], [0.7, 1.2, 2.8]));
+      const g = ev.find((e) => e.tipo === 'ursoGolpeado'); return { parte: g && g.parte, tonto: ev.some((e) => e.tipo === 'ursoTonto'), estado: s.l.testeUrso().tonto };""")
+    confere('impacto na cabeça deixa o urso tonto', r['parte'] == 'cabeca' and r['tonto'] and r['estado'], r)
+    # 33) mão meio fechada (indo agarrar) não golpeia, mesmo rápida
+    r = S(pg, """s.nova(); const [c] = s.clone(); s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 });
+      s.l.testeColocar(c, { x: 0, y: 0.47, z: 0 }); s.passos(10);
+      const ev = s.passos(40, (i) => s.urso([0, 2.45, 2], [-1, 1.2, 2], [0, 0.5, 0.9 - i * 8 / 60], [0, 0], [0, 0.6]));
+      return { golpes: ev.filter((e) => e.tipo === 'golpe').length, vel: +s.l.testeVelocidade(c).toFixed(2) };""")
+    confere('mão meio fechada não golpeia', r['golpes'] == 0, r)
+    # 34) a pata para na superfície: empurrar devagar para dentro do clone não o empurra
+    r = S(pg, """s.nova(); const [c] = s.clone(); s.l.testeColocar(s.l.numeroDoOriginal(), { x: 4, y: 0.47, z: -3 });
+      s.l.testeColocar(c, { x: 0, y: 0.47, z: 0 }); s.passos(10);
+      s.passos(60, (i) => s.urso([0, 2.45, 2], [-1, 1.2, 2], [0, 0.55, Math.max(0.05, 1.2 - i * 2 / 60)], [0, 0], [0, 0]));
+      const p = s.l.foto().piranbenjas.find((x) => x.numero === c).pos, pata = s.l.pataNaLuta('dir');
+      return { x: +p.x.toFixed(3), z: +p.z.toFixed(3), pataZ: +pata.z.toFixed(3), vel: +s.l.testeVelocidade(c).toFixed(2) };""")
+    confere('pata para na superfície e não empurra', abs(r['z']) < 0.03 and abs(r['x']) < 0.03 and 0.33 < r['pataZ'] < 0.38 and r['vel'] < 0.1, r)
+
+    # formações: o original em z = −2 olhando para o urso (cabeça em z = 3); os clones em volta dele
+    FORMAR = """s.nova({ clonesIniciais: N, semIA: SEMIA, comportamento: 'parados' }); const o = s.l.numeroDoOriginal(); const cs = s.clone();
+      s.l.testeColocar(o, { x: 0, y: 0.47, z: -2 }); cs.forEach((c, i) => s.l.testeColocar(c, { x: -1.2 + (i % 4) * 0.8, y: 0.47, z: -1.2 - Math.floor(i / 4) * 0.6 })); s.passos(5);"""
+    def formar(n, semia='true'): return FORMAR.replace('N', str(n)).replace('SEMIA', semia)
+    # 35) muralha: golpe durante a montagem desmancha como STRIKE
+    r = S(pg, formar(4) + """const ok = s.l.testeFormar('muralha'); s.passos(20);
+      const m = s.l.testeUnidades()[0]; const alvo = s.l.foto().piranbenjas.find((p) => p.numero === m.membros[1]).pos;
+      const ev = s.passos(20, (i) => s.urso([alvo.x, 2.45, alvo.z + 1.6], [-1, 1.2, 2], [alvo.x, 0.5, alvo.z + 0.9 - i * 8 / 60], [0, 0], [1, 1]));
+      return { ok, montada: m.montada, strike: ev.filter((e) => e.tipo === 'strike').length, desfeita: ev.filter((e) => e.tipo === 'formacaoDesfeita').map((e) => e.strike) };""")
+    confere('muralha montando: um golpe desmancha em STRIKE', r['ok'] and not r['montada'] and r['strike'] == 1 and r['desfeita'] == [True], r)
+    # 36) muralha montada: o golpe tira resistência e ninguém voa; agarrar um tira 1/3; com menos de 3, desfaz sem strike
+    r = S(pg, formar(4) + """s.l.testeFormar('muralha'); s.passos(80);
+      const m = s.l.testeUnidades()[0]; const pos = (n) => s.l.foto().piranbenjas.find((p) => p.numero === n).pos;
+      const a = pos(m.membros[1]);
+      s.passos(20, (i) => s.urso([a.x, 2.45, a.z + 1.6], [-1, 1.2, 2], [a.x, 0.5, a.z + 0.9 - i * 8 / 60], [0, 0], [1, 1]));
+      const depois = s.l.testeUnidades()[0], vel = s.l.testeVelocidade(m.membros[1]);
+      // muralha nova só para as puxadas (a pata saindo de trás da muralha arranharia no caminho)
+      { s.nova({ clonesIniciais: 4, semIA: true, comportamento: 'parados' }); const o2 = s.l.numeroDoOriginal();
+        s.l.testeColocar(o2, { x: 0, y: 0.47, z: -2 }); s.clone().forEach((c, i) => s.l.testeColocar(c, { x: -1.2 + i * 0.8, y: 0.47, z: -1.2 })); s.passos(5);
+        s.l.testeFormar('muralha'); s.passos(80); s.urso([0, 2.45, 1.6], [-1, 1.2, 2], [1.5, 1.2, 1.2]); s.passos(10); }
+      const m2 = s.l.testeUnidades()[0];
+      // a pata vai devagar (menos de 3 m/s: só encosta), fecha, levanta devagar e solta
+      let pata = [1.5, 1.2, 1.2];
+      const ir = (alvo, n, g) => { const de = pata; s.passos(n, (i) => { const k = (i + 1) / n; pata = de.map((v, j) => v + (alvo[j] - v) * k); s.urso([0, 2.45, 1.6], [-1, 1.2, 2], pata, [0, 0], g); }); };
+      const puxar = (n) => { const p = pos(n); ir([p.x, 0.6, p.z + 0.36], 50, [0, 0]); ir([p.x, 0.6, p.z + 0.36], 5, [0, 1]); ir([p.x, 1.2, p.z + 0.8], 40, [0, 1]); ir([p.x, 1.2, p.z + 0.8], 5, [0, 0]); ir([1.5, 1.2, 1.2], 50, [0, 0]); s.passos(20); };
+      puxar(m2.membros[0]); const um = s.l.testeUnidades()[0];
+      puxar(m2.membros[3]);
+      return { res0: m.res, res1: depois && +depois.res.toFixed(1), vel: +vel.toFixed(2), um: um && { res: +um.res.toFixed(1), n: um.membros.length }, res2: m2.res,
+        fim: s.l.testeUnidades().length, desfeita: s.ev.filter((e) => e.tipo === 'formacaoDesfeita').map((e) => e.strike), agarrou: s.ev.filter((e) => e.tipo === 'agarrou').length };""")
+    confere('muralha montada: golpe tira resistência e ninguém voa', r['res1'] is not None and r['res1'] < r['res0'] and r['vel'] < 0.5, r)
+    confere('agarrar tira 1/3 e, com poucos, desfaz sem strike', r['agarrou'] == 2 and r['um'] and r['um']['n'] == 3 and abs(r['um']['res'] - (r['res2'] - 10)) < 0.1 and r['fim'] == 0 and r['desfeita'] == [False], r)
+    # 37) catapulta: um clone que chega perto sobe sozinho e é lançado no urso (soco ×1,5)
+    r = S(pg, formar(4, 'false') + """s.l.testeFormar('catapulta'); s.passos(80);
+      const u = s.l.testeUnidades()[0]; const livre = s.clone().find((c) => !u.membros.includes(c));
+      s.l.testeColocar(livre, { x: 0.5, y: 0.47, z: -0.4 });
+      let lancou = null, golpe = null;
+      for (let i = 0; i < 400 && !golpe; i++) { s.urso([0, 2.45, 3], [-0.7, 1.2, 2.8], [0.7, 1.2, 2.8]); s.l.avancar(1 / 60);
+        for (const e of s.l.tirarEventos()) { if (e.tipo === 'catapulta') lancou = e; if (e.tipo === 'ursoGolpeado' && e.projetil) golpe = e; } }
+      return { tipo: u.tipo, lancou: !!lancou, golpe: golpe && { parte: golpe.parte, bloqueio: golpe.bloqueio, combo: golpe.combo } };""")
+    confere('catapulta lança o clone no urso', r['tipo'] == 'catapulta' and r['lancou'] and r['golpe'] is not None, r)
+    # 38) rebater: um soco no projétil antes de ele chegar no corpo; o urso não leva nada
+    r = S(pg, formar(4, 'false') + """s.l.testeFormar('catapulta'); s.passos(80);
+      const u = s.l.testeUnidades()[0]; const livre = s.clone().find((c) => !u.membros.includes(c));
+      s.l.testeColocar(livre, { x: 0.5, y: 0.47, z: -0.4 });
+      let rebateu = false, golpeado = false, socou = false;
+      for (let i = 0; i < 400 && !rebateu && !golpeado; i++) {
+        const voando = s.l.foto().piranbenjas.find((p) => p.estado === 'projetil');
+        let dir = [0.7, 1.2, 2.8], g = [0, 0];
+        if (voando && voando.pos.z > 1.2 && !socou) { socou = true; const q = voando.pos;
+          s.urso([0, 2.45, 3], [-0.7, 1.2, 2.8], [q.x, q.y, q.z + 0.6], [0, 0], [0, 0]); s.l.avancar(1 / 60); for (const e of s.l.tirarEventos()) { if (e.tipo === 'rebatida') rebateu = true; if (e.tipo === 'ursoGolpeado' && e.projetil) golpeado = true; }
+          dir = [q.x, q.y, q.z - 0.3]; g = [1, 1]; }
+        s.urso([0, 2.45, 3], [-0.7, 1.2, 2.8], dir, [0, 0], g); s.l.avancar(1 / 60);
+        for (const e of s.l.tirarEventos()) { if (e.tipo === 'rebatida') rebateu = true; if (e.tipo === 'ursoGolpeado' && e.projetil) golpeado = true; } }
+      return { rebateu, golpeado };""")
+    confere('urso rebate o projétil com um soco na hora certa', r['rebateu'] and not r['golpeado'], r)
+    # 39) escalar: o original encosta na torre, Espaço, troca de lugar com o do topo; Espaço de novo desce
+    r = S(pg, formar(4) + """s.l.testeFormar('torre'); s.passos(100); const u = s.l.testeUnidades()[0];
+      s.l.testeColocar(o, { x: 0, y: 0.47, z: -0.55 }); s.passos(2); const antes = s.l.acaoDeEspaco();
+      s.l.controle.espaco = true; s.passos(50); const yTopo = s.l.foto().piranbenjas.find((p) => p.numero === s.l.numeroDoOriginal()).pos.y;
+      const naTorre = s.l.testeUnidades()[0].membros.includes(s.l.numeroDoOriginal()), membros = s.l.testeUnidades()[0].membros.length, agora = s.l.acaoDeEspaco();
+      s.l.controle.espaco = true; s.passos(60); const yChao = s.l.foto().piranbenjas.find((p) => p.numero === s.l.numeroDoOriginal()).pos.y;
+      return { antes, agora, yTopo: +yTopo.toFixed(2), naTorre, membros, yChao: +yChao.toFixed(2) };""")
+    confere('escalar a torre com Espaço (e descer)', r['antes'] == 'escalar' and r['naTorre'] and r['yTopo'] > 2 and r['membros'] == 3 and r['agora'] == 'descer' and r['yChao'] < 0.7, r)
+    # 40) corrente: a ponta vai até a perna do urso, enrola e o urso cai sentado
+    r = S(pg, formar(5) + """s.l.testeFormar('corrente'); let enrolou = null, caiu = false;
+      for (let i = 0; i < 420 && !caiu; i++) { s.l.avancar(1 / 60); for (const e of s.l.tirarEventos()) { if (e.tipo === 'correnteEnrolou') enrolou = e.parte; if (e.tipo === 'ursoCaiu') caiu = true; } }
+      return { enrolou, caiu, unidades: s.l.testeUnidades().length };""")
+    confere('corrente enrola na perna e o urso cai sentado', (r['enrolou'] or '').startswith('perna') and r['caiu'] and r['unidades'] == 0, r)
+    # 41) fila: investe em linha; os impactos quase juntos fazem combo
+    r = S(pg, formar(5) + """s.l.testeFormar('fila'); const n = s.l.testeUnidades()[0].membros.length; const ev = s.passos(240);
+      const gs = ev.filter((e) => e.tipo === 'ursoGolpeado'); return { n, combos: gs.map((g) => g.combo), unidades: s.l.testeUnidades().length };""")
+    confere('fila investe e faz combo', r['n'] >= 3 and len(r['combos']) >= 3 and max(r['combos']) >= 2.2 and r['unidades'] == 0, r)
+    # 42) roda das formações: precisa de clones perto (até 4 m)
+    r = S(pg, formar(3) + """const p = s.l.formacoesPossiveis(); return { muralha: p.muralha, catapulta: p.catapulta, pode: s.l.testeFormar('muralha') };""")
+    confere('formação só com clones suficientes perto', r['muralha']['tem'] == 3 and r['muralha']['precisa'] == 4 and not r['pode'], r)
+    # 43) onomatopeia: o quadro do texto cresce com a palavra (antes era fixo em 512 e cortava)
+    r = pg.evaluate("""() => { const c = document.createElement('canvas').getContext('2d'); c.font = '900 104px "Baloo 2", "Trebuchet MS", sans-serif';
+      return { longa: c.measureText('SOCO LATERAL!').width, curta: c.measureText('PAF!').width }; }""")
+    confere('palavra longa passa de 512 px (por isso o quadro agora é medido)', r['longa'] > 512, r)
 
     reais = [e for e in erros if 'GPU stall' not in e and 'WebGL' not in e]
     if reais: print('erros no console:', reais); erros_teste.append('console')

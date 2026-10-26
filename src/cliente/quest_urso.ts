@@ -6,6 +6,8 @@
 //
 // Rodada 2 do urso (C14/C15): braço que estica para baixo, relógio que acende ao olhar o pulso, pausa com opções
 // (segurar Y por 1 s, só no solo), painel de configuração do solo, cores dos acertos e placas de intenção.
+// C20–C23: a pata para na superfície dos Piranbenjas (a mão de verdade aparece como contorno), cair sentado
+// (a visão desce ~1 m), tonto (a visão balança), esbarrar nas formações e as placas de resistência delas.
 
 import * as THREE from 'three';
 import { entrada, ligarControlesVR, lerVR, vibrar, type Lado } from '../xr/entrada';
@@ -13,9 +15,9 @@ import { criarPata, type EstadoMao, type Mao } from '../xr/patas';
 import { Luta, prepararFisica, type Comportamento, type EntradaUrso, type Evento, type Formacao, type Foto } from '../simulacao/luta';
 import { EQUILIBRIO, GOLPES, OMBRO_ABAIXO_DOS_OLHOS, RINGUE, type V3, PIRANBENJA, URSO, VIBRACAO, classificarGolpe, esticarAltura, gerarBlocos, qualidadeDoGolpe } from '../simulacao/regras';
 import { codificarEntrada, decodificarFoto } from '../rede/protocolo';
-import { pertoEntreSegmentos } from '../simulacao/corpoUrso';
+import { CORPO_URSO, pataNaSuperficie, pertoEntreSegmentos, type CapsulaPB } from '../simulacao/corpoUrso';
 import { abrirCanal, type Canal } from '../rede/canal';
-import { Onomatopeias, Piranbenjas, criarCena, criarRingue } from './visual';
+import { Formacoes, Onomatopeias, Piranbenjas, criarCena, criarRingue } from './visual';
 import { T } from '../textos';
 
 export interface OpcoesQuest { modo: 'online' | 'solo'; tipoCanal: 'trystero' | 'local'; codigo?: string }
@@ -23,7 +25,7 @@ export interface OpcoesQuest { modo: 'online' | 'solo'; tipoCanal: 'trystero' | 
 /** Opções do solo de teste (ficam guardadas neste navegador). */
 export interface ConfigSolo { comportamento: Comportamento; quantidade: number; formacao: Formacao; cores: boolean; placas: boolean; esticar: number; decolagem: 'voar' | 'escurecer' }
 const COMPORTAMENTOS: Comportamento[] = ['parados', 'aleatorio', 'cautelosos', 'ofensivos'];
-const FORMACOES: Formacao[] = ['solto', 'torre', 'piramide', 'muralha', 'corrente'];
+const FORMACOES: Formacao[] = ['solto', 'muralha', 'catapulta', 'torre', 'piramide', 'corrente', 'fila'];
 const CHAVE_CONFIG = 'lutcha.soloTeste';
 
 function lerConfig(): ConfigSolo {
@@ -81,7 +83,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   const camera = new THREE.PerspectiveCamera(70, 1, 0.01, 200);
   const rig = new THREE.Group(); cena.add(rig); rig.add(camera); camera.position.set(0, 1.6, 0);
   rig.position.set(0, 0, 3);
-  const pbs = new Piranbenjas(cena), onos = new Onomatopeias(cena);
+  const pbs = new Piranbenjas(cena), onos = new Onomatopeias(cena), formacoes = new Formacoes(cena);
 
   // ---------- patas: presas num "alvo" que segue o controle, mas desce mais (braço que estica) ----------
   const estadoPata: EstadoMao = { cor: 'normal', agulhas: 0, furadeira: false, carga: 0, sabre: false, tamanho: 1.3 };
@@ -112,7 +114,35 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       patas[l].apontarAntebraco(rig.localToWorld(cot), 2.4);
     }
   }
-  const posPata = (l: Lado) => alvoPata[l].getWorldPosition(new THREE.Vector3());
+  // a pata que aparece para na superfície dos Piranbenjas; a mão de verdade (a que vai para a luta) vira um contorno
+  const pataBruta: Record<Lado, THREE.Vector3> = { esq: new THREE.Vector3(), dir: new THREE.Vector3() };
+  const efetiva: Record<Lado, V3 | null> = { esq: null, dir: null };
+  const contorno: Record<Lado, THREE.Mesh> = { esq: criarContorno(), dir: criarContorno() };
+  function criarContorno(): THREE.Mesh {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.28), new THREE.MeshBasicMaterial({ color: '#e8f3f2', wireframe: true, transparent: true, opacity: 0.35, depthWrite: false }));
+    m.visible = false; cena.add(m); return m;
+  }
+  function capsulasDaFoto(f: Foto | null): CapsulaPB[] {
+    if (!f) return [];
+    const eixo = new THREE.Vector3(), q = new THREE.Quaternion();
+    return f.piranbenjas.filter((p) => !p.partes && !p.agarrado && !p.grudado && p.estado !== 'projetil').map((p) => {
+      eixo.set(0, PIRANBENJA.altura / 2 - PIRANBENJA.raio, 0).applyQuaternion(q.set(p.rot[0], p.rot[1], p.rot[2], p.rot[3]));
+      return { a: { x: p.pos.x - eixo.x, y: p.pos.y - eixo.y, z: p.pos.z - eixo.z }, b: { x: p.pos.x + eixo.x, y: p.pos.y + eixo.y, z: p.pos.z + eixo.z }, r: PIRANBENJA.raio };
+    });
+  }
+  function pararPatasNaSuperficie(): void {
+    const caps = capsulasDaFoto(ultimaFoto), raio = CORPO_URSO.raioPata * (estadoPata.tamanho / 1.3);
+    for (const l of ['esq', 'dir'] as const) {
+      alvoPata[l].getWorldPosition(pataBruta[l]);
+      const b = pataBruta[l], e = pataNaSuperficie(efetiva[l], { x: b.x, y: b.y, z: b.z }, raio, caps);
+      efetiva[l] = e;
+      alvoPata[l].position.copy(rig.worldToLocal(new THREE.Vector3(e.x, e.y, e.z)));
+      const longe = Math.hypot(e.x - b.x, e.y - b.y, e.z - b.z) > 0.03;
+      contorno[l].visible = longe; if (longe) { contorno[l].position.copy(b); contorno[l].quaternion.copy(alvoPata[l].getWorldQuaternion(tmpQ)); }
+    }
+  }
+  /** Onde a mão de verdade está (é isso que vai para a luta; o PC também para a pata na superfície). */
+  const posPata = (l: Lado) => pataBruta[l].clone();
 
   // ---------- relógio no pulso esquerdo: só acende quando você olha para ele ----------
   const pc = document.createElement('canvas'); pc.width = 256; pc.height = 160;
@@ -129,6 +159,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     g.fillText(`${T.relogio.res} ${f?.urso.res ?? 100}  ${T.relogio.aura} ${f?.urso.aura ?? 0}`, 12, 40);
     g.fillStyle = '#8fd651'; g.fillText(`${T.relogio.placar} ${f?.placar.urso ?? 0} × ${f?.placar.piranbenja ?? 0}`, 12, 80);
     g.fillStyle = '#ffe066'; g.fillText(`${T.relogio.acertos} ${acertos}`, 12, 120);
+    g.fillStyle = '#c58fff'; g.fillText(`${T.relogio.equilibrio} ${f?.urso.equilibrio ?? 0}`, 150, 120);
     if (solo) { g.fillStyle = '#e8f3f2'; g.font = '600 17px Nunito, sans-serif'; g.fillText(T.painel.dicaPausa, 12, 150); }
     pt.needsUpdate = true;
   }
@@ -355,7 +386,17 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     if (ev.tipo === 'strike') { const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.strike, { x: c.x, y: c.y + 0.2, z: c.z - 3 }, '#ff7a6b', 0.9, 1.4); }
     if (ev.tipo === 'fimRodada') avisar(ev.vencedor === 'urso' ? T.fimUrso : T.fimPiranbenja);
     if (ev.tipo === 'ursoDecolou') decolar(ev.vel);
-    if (ev.tipo === 'novaRodada') { rig.position.set(0, 0, 3); rig.rotation.set(0, 0, 0); empurrao.set(0, 0, 0); voo = null; escuro = null; telaPreta.visible = false; }
+    if (ev.tipo === 'novaRodada') { rig.position.set(0, 0, 3); rig.rotation.set(0, 0, 0); empurrao.set(0, 0, 0); voo = null; escuro = null; telaPreta.visible = false; sentadoAte = 0; tontoAte = 0; abaixado = 0; }
+    if (ev.tipo === 'ursoCaiu') {
+      sentadoAte = performance.now() / 1000 + ev.segundos; vibrar('esq', ...VIBRACAO.levarGolpe); vibrar('dir', ...VIBRACAO.levarGolpe);
+      const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.urso.caiu, { x: c.x, y: c.y - 0.2, z: c.z - 1.4 }, '#c58fff', 0.35, 1.2);
+      if (config.decolagem === 'escurecer') piscar = 0;
+    }
+    if (ev.tipo === 'ursoTonto') tontoAte = performance.now() / 1000 + ev.segundos;
+    if (ev.tipo === 'ursoEmpurrado' && !voo) { rig.position.x += ev.x; rig.position.z += ev.z; } // esbarrou numa formação
+    if (ev.tipo === 'formacao') onos.mostrar(T.gritos[ev.nome], { ...ev.centro, y: 2.2 }, '#c58fff', 0.5, 1.4);
+    if (ev.tipo === 'rebatida') { vibrar(ev.mao, ...VIBRACAO.cheio); const p = ultimaFoto?.piranbenjas.find((x) => x.numero === ev.numero)?.pos; if (p) onos.mostrar(T.urso.rebatida, { x: p.x, y: p.y + 0.8, z: p.z }, '#ff7a6b', 0.4, 1.1); }
+    if (ev.tipo === 'ursoGolpeado' && ev.bloqueio && ev.ponto) onos.mostrar(T.urso.bloqueio, { ...ev.ponto, y: ev.ponto.y + 0.4 }, '#e8f3f2', 0.3, 1.0);
   }
 
   // ---------- decolagem: voar junto (modo Insano, padrão) ou escurecer e aparecer onde caiu ----------
@@ -364,8 +405,22 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   const telaPreta = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthTest: false }));
   telaPreta.position.set(0, 0, -0.15); telaPreta.renderOrder = 99; telaPreta.visible = false; camera.add(telaPreta);
   const dentroDoRingue = (p: THREE.Vector3) => Math.hypot(p.x, p.z) <= RINGUE.raio;
+  // sentado (barra de equilíbrio cheia): a visão desce ~1 m em 0,4 s; tonto: balança um pouco
+  let sentadoAte = 0, tontoAte = 0, abaixado = 0, piscar = -1;
+  function sentarETonto(dt: number, agora: number): void {
+    const alvo = agora < sentadoAte ? -1.0 : 0;
+    const novo = config.decolagem === 'escurecer' && piscar >= 0 ? (piscar > 0.15 ? alvo : abaixado) : abaixado + (alvo - abaixado) * Math.min(1, dt / 0.13);
+    if (!voo && !escuro) rig.position.y += novo - abaixado;
+    abaixado = novo;
+    if (piscar >= 0) { // escurecer: pisca a tela em vez de descer devagar
+      piscar += dt; telaPreta.visible = true;
+      (telaPreta.material as THREE.MeshBasicMaterial).opacity = piscar < 0.15 ? piscar / 0.15 : Math.max(0, 1 - (piscar - 0.15) / 0.2);
+      if (piscar > 0.35) { piscar = -1; if (!escuro) telaPreta.visible = false; }
+    }
+    rig.rotation.z = agora < tontoAte ? Math.sin(agora * 9) * 0.035 * Math.min(1, (tontoAte - agora) * 2) : 0;
+  }
   function decolar(vel: V3): void {
-    empurrao.set(0, 0, 0);
+    empurrao.set(0, 0, 0); sentadoAte = 0; rig.position.y -= abaixado; abaixado = 0;
     if (config.decolagem === 'voar') { voo = new THREE.Vector3(vel.x, vel.y, vel.z); return; }
     // escurecer: calcula onde cai (arco simples) e leva o urso para lá com a tela escura
     const t = (2 * vel.y) / 9.81, destino = rig.position.clone().add(new THREE.Vector3(vel.x * t, 0, vel.z * t));
@@ -425,7 +480,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       lerVR();
       if (medirEm > 0 && --medirEm === 0 && camera.position.y > 0.5) alturaReal = camera.position.y;
       controlarPausa();
-      if (!pausado && !voo && !escuro) {
+      if (!pausado && !voo && !escuro && agora >= sentadoAte) { // sentado no chão não anda
         // analógico esquerdo anda (o gigante anda mais por passo); direito gira 30°
         const a = entrada.maos.esq.analogico;
         if (a.lengthSq() > 0.01) {
@@ -445,7 +500,8 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     rig.scale.setScalar(escala());
     posicionarPatas();
     // empurrão recebido: desliza e perde força
-    if (!pausado) { rig.position.addScaledVector(empurrao, dt); empurrao.multiplyScalar(Math.exp(-2.5 * dt)); voar(dt); }
+    if (!pausado) { rig.position.addScaledVector(empurrao, dt); empurrao.multiplyScalar(Math.exp(-2.5 * dt)); voar(dt); sentarETonto(dt, agora); }
+    pararPatasNaSuperficie();
     const e = entradaDoUrso();
     let foto: Foto | null;
     if (luta) {
@@ -458,7 +514,7 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       while (eventosRecebidos.length) reagir(eventosRecebidos.shift()!);
       foto = fotoInterpolada(agora);
     }
-    if (foto) { pbs.desenhar(foto.piranbenjas, { olharPara: e.cabeca, ajudas: config.placas, tempo: agora }); ultimaFoto = foto; }
+    if (foto) { pbs.desenhar(foto.piranbenjas, { olharPara: e.cabeca, ajudas: config.placas, tempo: agora }); formacoes.desenhar(foto.formacoes); ultimaFoto = foto; }
     if (!luta) preverContatos(dt, agora);
     for (const l of ['esq', 'dir'] as const) patas[l].atualizar(entrada.maos[l].gatilhoValor, entrada.maos[l].gripValor, estadoPata, rig.scale.x, agora, dt);
     painelPulso.visible = olhandoOPulso();
@@ -473,7 +529,8 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   render.setAnimationLoop(quadro);
   (window as unknown as { __teste: unknown }).__teste = { THREE, entrada, rig, camera, patas, alvoPata, config, pbs, get luta() { return luta; }, get canal() { return canal; }, fotos,
     get pausado() { return pausado; }, get acertos() { return acertos; }, get pulsoVisivel() { return painelPulso.visible; }, get voando() { return !!voo || !!escuro; },
+    get abaixado() { return abaixado; }, get contornoVisivel() { return contorno.esq.visible || contorno.dir.visible; }, efetiva,
     abrirPausa, fecharPausa,
     // só para os testes: o Chromium sem tela desenha poucos quadros; isto manda a entrada na hora
-    enviarAgora: () => { posicionarPatas(); if (canal?.conectado()) canal.enviarRapido(codificarEntrada(entradaDoUrso())); } };
+    enviarAgora: () => { posicionarPatas(); pararPatasNaSuperficie(); if (canal?.conectado()) canal.enviarRapido(codificarEntrada(entradaDoUrso())); } };
 }

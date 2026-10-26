@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import type { V3, Zona } from '../simulacao/regras';
 import { PIRANBENJA, RINGUE } from '../simulacao/regras';
 import { CORPO_URSO, type EsqueletoUrso, type Lado, type SegUrso } from '../simulacao/corpoUrso';
-import { LAYOUT_PARTES, PARTES, type EstadoIA, type FotoPiranbenja, type Parte } from '../simulacao/luta';
+import { LAYOUT_PARTES, PARTES, type EstadoIA, type FotoFormacao, type FotoPiranbenja, type Parte } from '../simulacao/luta';
 import { T } from '../textos';
 
 export function criarCena(): { cena: THREE.Scene } {
@@ -87,7 +87,7 @@ function criarBoneco(): Boneco {
 }
 
 const PARTES_DA_ZONA: Record<Zona, Parte[]> = { cabeca: ['cabeca'], tronco: ['tronco'], bracos: ['bracoE', 'bracoD'], pernas: ['pernaE', 'pernaD'] };
-const COR_ESTADO: Partial<Record<EstadoIA, string>> = { aproximando: '#ffe066', armando: '#ff9a3c', atacando: '#ff4a4a', atordoado: '#8fd0ff', recuando: '#8fd651' };
+const COR_ESTADO: Partial<Record<EstadoIA, string>> = { aproximando: '#ffe066', armando: '#ff9a3c', atacando: '#ff4a4a', atordoado: '#8fd0ff', recuando: '#8fd651', caido: '#8fd0ff', escalando: '#c58fff', projetil: '#ff7a6b' };
 
 const texturasPlaca = new Map<string, THREE.CanvasTexture>();
 function texturaPlaca(texto: string, cor: string): THREE.CanvasTexture {
@@ -139,7 +139,8 @@ export class Piranbenjas {
         else if (dePe && op.olharPara) b.grupo.rotation.set(0, Math.atan2(op.olharPara.x - p.pos.x, op.olharPara.z - p.pos.z), 0);
         this.posarAtaque(b, p);
         // armar inclina para trás (o aviso do ataque); atacar joga para frente; martelada achata
-        const incl = p.estado === 'armando' ? -0.38 : p.estado === 'atacando' ? 0.45 : 0;
+        const forte = p.ataque === 'cabecada' || p.ataque === 'chute';
+        const incl = p.estado === 'armando' ? (forte ? -0.6 : -0.38) : p.estado === 'atacando' ? (p.ataque === 'chute' ? -0.9 : forte ? 0.8 : 0.45) : 0;
         b.corpo.rotation.x += (incl - b.corpo.rotation.x) * 0.3;
         if (p.achatado) { b.corpo.scale.set(1.35, 0.45, 1.35); b.corpo.position.y = -PIRANBENJA.altura * 0.27; }
         else { b.corpo.scale.setScalar(1); b.corpo.position.y = 0; }
@@ -150,15 +151,17 @@ export class Piranbenjas {
         for (const m of b.mats[n]) { m.emissive.copy(br.cor); m.emissiveIntensity = k; }
       }
       const cabeca = p.partes ? p.partes.cabeca.pos : { x: p.pos.x, y: p.pos.y + 0.27 * (p.achatado ? 0.45 : 1), z: p.pos.z };
-      b.estrelas.visible = p.estado === 'atordoado' && !p.agarrado;
+      b.estrelas.visible = (p.estado === 'atordoado' || p.estado === 'caido') && !p.agarrado;
       if (b.estrelas.visible) { b.estrelas.position.set(cabeca.x, cabeca.y + 0.32, cabeca.z); b.estrelas.rotation.y = agora * 5; }
       const corEstado = COR_ESTADO[p.estado];
       b.anel.visible = !!op.ajudas && !!corEstado && !p.partes;
       if (b.anel.visible) { b.anel.position.set(p.pos.x, 0.02, p.pos.z); (b.anel.material as THREE.MeshBasicMaterial).color.set(corEstado!); }
+      const qual = p.ataque === 'morder' ? 'morder' : p.ataque === 'tapa' ? 'tapa' : p.ataque === 'cabecada' ? 'cabecada' : p.ataque === 'chute' ? 'chute' : 'socar';
       const texto = !op.ajudas || p.grudado ? '' : p.estado === 'aproximando' ? T.intencao.aproximando
-        : p.estado === 'armando' ? (p.ataque === 'morder' ? T.intencao.armando_morder : p.ataque === 'tapa' ? T.intencao.armando_tapa : T.intencao.armando_socar)
-        : p.estado === 'atacando' ? (p.ataque === 'morder' ? T.intencao.atacando_morder : p.ataque === 'tapa' ? T.intencao.atacando_tapa : T.intencao.atacando_socar)
-        : p.estado === 'recuando' ? T.intencao.recuando : ''; // atordoado já mostra as estrelinhas
+        : p.estado === 'armando' ? T.intencao[`armando_${qual}`]
+        : p.estado === 'atacando' ? T.intencao[`atacando_${qual}`]
+        : p.estado === 'escalando' ? T.intencao.escalando
+        : p.estado === 'recuando' ? T.intencao.recuando : ''; // atordoado e caído já mostram as estrelinhas
       b.placa.visible = !!texto;
       if (texto) {
         if (b.placaTexto !== texto + corEstado) { (b.placa.material as THREE.SpriteMaterial).map = texturaPlaca(texto, corEstado ?? '#e8f3f2'); (b.placa.material as THREE.SpriteMaterial).needsUpdate = true; b.placaTexto = texto + corEstado; }
@@ -172,10 +175,14 @@ export class Piranbenjas {
   /** Braços e boca de cada ataque: socar puxa o braço para trás e soca para frente; tapa abre o braço para o lado
    *  e bate; mordida abre a boca e joga a cabeça para frente. */
   private posarAtaque(b: Boneco, p: FotoPiranbenja): void {
-    const D = b.partes.bracoD, E = b.partes.bracoE, cab = b.partes.cabeca;
-    let dx = 0, dz = 0, ex = 0, ez = 0, cabZ = 0;
+    const D = b.partes.bracoD, E = b.partes.bracoE, cab = b.partes.cabeca, PE = b.partes.pernaE, PD = b.partes.pernaD;
+    let dx = 0, dz = 0, ex = 0, ez = 0, cabZ = 0, pernas = 0;
     const armando = p.estado === 'armando', atacando = p.estado === 'atacando';
     if (p.ataque === 'socar') { if (armando) dx = 0.9; if (atacando) dx = -1.55; }
+    // cabeçada: cabeça para trás e depois para frente; chute: as duas pernas encolhem e depois esticam para frente
+    if (p.ataque === 'cabecada') { if (armando) cabZ = -0.12; if (atacando) cabZ = 0.16; }
+    if (p.ataque === 'chute') { if (armando) { pernas = 0.9; dx = ex = 0.6; } if (atacando) pernas = -1.5; }
+    PE.rotation.x += (pernas - PE.rotation.x) * 0.45; PD.rotation.x += (pernas - PD.rotation.x) * 0.45;
     if (p.ataque === 'tapa') { if (armando) { dz = 1.3; dx = -0.3; } if (atacando) { dz = -0.2; dx = -1.3; } }
     if (p.ataque === 'morder' && atacando) cabZ = 0.1;
     if (p.estado === 'atordoado') { ez = -0.5; dz = 0.5; } // braços abertos, tontinho
@@ -274,16 +281,52 @@ export class UrsoDeFora {
   }
 
   /** Barra de resistência (e quantos estão grudados) acima da cabeça. */
-  mostrarBarra(res: number, grudados: number, visivel = true): void {
+  mostrarBarra(res: number, grudados: number, visivel = true, equilibrio = 0): void {
     this.barra.visible = visivel; if (!visivel) return;
-    const txt = Math.round(res) + '/' + grudados; if (txt === this.barraTxt) return; this.barraTxt = txt;
+    const txt = Math.round(res) + '/' + grudados + '/' + Math.round(equilibrio / 5); if (txt === this.barraTxt) return; this.barraTxt = txt;
     const g = this.barraCanvas.getContext('2d')!; g.clearRect(0, 0, 256, 64);
-    g.fillStyle = 'rgba(12,26,36,0.85)'; g.beginPath(); g.roundRect(2, 8, 252, 48, 14); g.fill();
-    g.fillStyle = '#2a3d48'; g.fillRect(14, 20, 228, 24);
-    g.fillStyle = res > 50 ? '#8fd651' : res > 25 ? '#ffe066' : '#ff6b5b'; g.fillRect(14, 20, 228 * Math.max(0, Math.min(1, res / 100)), 24);
-    g.fillStyle = '#ffffff'; g.font = '800 22px Nunito, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(Math.round(res) + (grudados ? '  · ' + grudados + ' ' + T.pc.curtoGrudados : ''), 128, 33);
+    g.fillStyle = 'rgba(12,26,36,0.85)'; g.beginPath(); g.roundRect(2, 4, 252, 56, 14); g.fill();
+    g.fillStyle = '#2a3d48'; g.fillRect(14, 12, 228, 24);
+    g.fillStyle = res > 50 ? '#8fd651' : res > 25 ? '#ffe066' : '#ff6b5b'; g.fillRect(14, 12, 228 * Math.max(0, Math.min(1, res / 100)), 24);
+    // embaixo, fininha: a barra de equilíbrio (cheia, o urso cai sentado)
+    g.fillStyle = '#2a3d48'; g.fillRect(14, 42, 228, 10);
+    g.fillStyle = '#c58fff'; g.fillRect(14, 42, 228 * Math.max(0, Math.min(1, equilibrio / 100)), 10);
+    g.fillStyle = '#ffffff'; g.font = '800 20px Nunito, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(Math.round(res) + (grudados ? '  · ' + grudados + ' ' + T.pc.curtoGrudados : ''), 128, 25);
     this.barraTex.needsUpdate = true;
+  }
+}
+
+const FONTE_ONO = '900 104px "Baloo 2", "Trebuchet MS", sans-serif';
+
+/** Formações: nome e barra de resistência em cima de cada uma (todos veem: é informação do jogo, não do original). */
+export class Formacoes {
+  private placas = new Map<number, { s: THREE.Sprite; c: HTMLCanvasElement; t: THREE.CanvasTexture; txt: string }>();
+  constructor(private cena: THREE.Scene) {}
+  desenhar(lista: FotoFormacao[], alturaTopo: (f: FotoFormacao) => number = (f) => (f.tipo === 'torre' || f.tipo === 'piramide' ? 3.05 : 1.35)): void {
+    const vivas = new Set<number>();
+    for (const f of lista) {
+      vivas.add(f.id);
+      let p = this.placas.get(f.id);
+      if (!p) {
+        const c = document.createElement('canvas'); c.width = 320; c.height = 96;
+        const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false })); s.renderOrder = 9; s.scale.set(0.6, 0.18, 1);
+        this.cena.add(s); p = { s, c, t, txt: '' }; this.placas.set(f.id, p);
+      }
+      p.s.position.set(f.centro.x, alturaTopo(f), f.centro.z);
+      const txt = `${f.tipo}|${f.res}|${f.max}|${f.montando}`;
+      if (txt === p.txt) continue;
+      p.txt = txt;
+      const g = p.c.getContext('2d')!; g.clearRect(0, 0, 320, 96);
+      g.fillStyle = 'rgba(12,26,36,0.85)'; g.beginPath(); g.roundRect(2, 2, 316, 92, 18); g.fill();
+      g.fillStyle = '#e8f3f2'; g.font = '800 30px "Baloo 2", Nunito, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(T.gritos[f.tipo].replace('!', ''), 160, 30);
+      g.fillStyle = '#2a3d48'; g.fillRect(16, 56, 288, 24);
+      g.fillStyle = f.montando ? '#ffe066' : '#c58fff'; g.fillRect(16, 56, 288 * Math.max(0, Math.min(1, f.res / Math.max(1, f.max))), 24);
+      p.t.needsUpdate = true;
+    }
+    for (const [id, p] of this.placas) if (!vivas.has(id)) { this.cena.remove(p.s); p.t.dispose(); (p.s.material as THREE.SpriteMaterial).dispose(); this.placas.delete(id); }
   }
 }
 
@@ -291,15 +334,23 @@ export class UrsoDeFora {
 export class Onomatopeias {
   private vivas: { s: THREE.Sprite; ate: number; vel: number }[] = [];
   constructor(private cena: THREE.Scene) {}
+  /** Largura do desenho medida pela palavra (C22: palavras longas como "SOCO LATERAL!" saíam cortadas no quadro fixo de 512). */
+  static medida(texto: string): { largura: number; altura: number } {
+    const g = document.createElement('canvas').getContext('2d')!;
+    g.font = FONTE_ONO;
+    const m = g.measureText(texto);
+    return { largura: Math.ceil(m.width + 16 + 40), altura: 160 }; // contorno (16) + folga dos lados
+  }
   mostrar(texto: string, pos: V3, cor = '#ffe066', tamanho = 0.6, segundos = 0.9): void {
-    const c = document.createElement('canvas'); c.width = 512; c.height = 160;
+    const { largura, altura } = Onomatopeias.medida(texto);
+    const c = document.createElement('canvas'); c.width = largura; c.height = altura;
     const g = c.getContext('2d')!;
-    g.font = '900 104px "Baloo 2", "Trebuchet MS", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineWidth = 16; g.strokeStyle = '#0c1a24'; g.strokeText(texto, 256, 84);
-    g.fillStyle = cor; g.fillText(texto, 256, 84);
+    g.font = FONTE_ONO; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    g.lineWidth = 16; g.strokeStyle = '#0c1a24'; g.strokeText(texto, largura / 2, 84);
+    g.fillStyle = cor; g.fillText(texto, largura / 2, 84);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false }));
-    s.scale.set(tamanho * 3.2, tamanho, 1); s.position.set(pos.x, pos.y, pos.z); s.renderOrder = 10;
+    s.scale.set(tamanho * (largura / altura), tamanho, 1); s.position.set(pos.x, pos.y, pos.z); s.renderOrder = 10;
     this.cena.add(s); this.vivas.push({ s, ate: performance.now() / 1000 + segundos, vel: 0.6 });
   }
   atualizar(dt: number): void {

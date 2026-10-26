@@ -79,7 +79,8 @@ with servidor(), sync_playwright() as p:
     solo.evaluate('() => {' + VR + '}'); solo.evaluate('() => window.__vr.ligar()')
     J(solo, 't.config.esticar = 1')
     solo.evaluate("() => { __vr.maoMundo('esq', -0.5, 1.4, 2.4); __vr.maoMundo('dir', 0.3, 1.4, 2.4); }"); time.sleep(2)
-    confere('solo começa com a pirâmide', J(solo, 'return t.luta.foto().piranbenjas.length') == 6 and J(solo, "return t.luta.foto().piranbenjas.filter(p => p.estado === 'formacao').length") == 6)
+    confere('solo começa com a pirâmide', J(solo, 'return t.luta.foto().piranbenjas.length') == 7 and J(solo, "return t.luta.foto().piranbenjas.filter(p => p.estado === 'formacao').length") == 6
+            and J(solo, 'return t.luta.foto().formacoes.length') == 1)
     solo.evaluate("""async () => { window.__vib = []; __vr.dedos('dir', 1, 1); await new Promise(r => setTimeout(r, 400));
       for (let i = 0; i <= 5; i++) { __vr.maoMundo('dir', 0.05, 0.5, 2.4 - i * 0.2); await new Promise(r => setTimeout(r, 260)); } }""")  # passos de 20 cm: acima da velocidade mínima de golpe mesmo com poucos quadros
     time.sleep(0.3)
@@ -88,6 +89,23 @@ with servidor(), sync_playwright() as p:
     confere('solo: soco na pirâmide acerta e vibra', J(solo, 'return t.acertos') >= 1 and any(v[0] == 'dir' and v[2] >= 60 for v in vib), {'acertos': J(solo, 'return t.acertos'), 'vib': vib[:3]})
     time.sleep(2.5)
     solo.screenshot(path=F + 'rede_05_solo_piramide_depois.png')
+    # a pata para na superfície: a mão de verdade dentro de um Piranbenja vira contorno
+    solo.goto(URL + '?modo=solo&formacao=muralha&comportamento=parados'); solo.wait_for_function('() => window.__teste && window.__teste.luta')
+    solo.evaluate('() => {' + VR + '}'); solo.evaluate('() => window.__vr.ligar()'); J(solo, 't.config.esticar = 1')
+    alvo = J(solo, "const f = t.luta.foto(); return f.piranbenjas.find(p => p.estado === 'formacao').pos")
+    solo.evaluate("(a) => { __vr.dedos('dir', 0, 0); __vr.maoMundo('esq', -0.6, 1.4, 2.4); __vr.maoMundo('dir', a.x + 0.6, 0.6, a.z + 0.6); }", alvo); time.sleep(0.8)
+    solo.evaluate("(a) => __vr.maoMundo('dir', a.x, 0.6, a.z + 0.05)", alvo); time.sleep(0.8)
+    solo.screenshot(path=F + 'rede_08_contorno_da_mao.png')
+    confere('Quest: a mão dentro do Piranbenja vira contorno', J(solo, 'return t.contornoVisivel') is True, J(solo, 'return t.efetiva'))
+    # caiu sentado: a visão desce ~1 m
+    J(solo, 't.luta.cairSentado()'); menor = 0
+    for _ in range(30):  # o Chrome sem tela desenha poucos quadros: espera até 3 s pela descida
+        menor = min(menor, J(solo, 'return t.abaixado'))
+        if menor < -0.8: break
+        time.sleep(0.1)
+    confere('Quest: cair sentado abaixa a visão', menor < -0.8, menor)
+    time.sleep(3)
+    confere('Quest: levanta depois de 2 s', J(solo, 'return t.abaixado') > -0.1, J(solo, 'return t.abaixado'))
     # relógio: apagado com o pulso virado para fora; acende quando as costas do pulso viram para os olhos
     # mão esquerda na frente do rosto, um pouco abaixo dos olhos (onde se olha um relógio)
     solo.evaluate("() => { __vr.dedos('dir', 0, 0); __vr.maoMundo('esq', 0, 2.0, 2.4); __vr.maoMundo('dir', 0.4, 1.3, 2.4); window.__teste.entrada.maos.esq.pose.quaternion.identity(); }"); time.sleep(0.8)
