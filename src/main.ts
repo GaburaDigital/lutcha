@@ -8,6 +8,7 @@ import { Luta, prepararFisica } from './simulacao/luta';
 import * as protocolo from './rede/protocolo';
 import * as regras from './simulacao/regras';
 import * as corpoUrso from './simulacao/corpoUrso';
+import * as taticas from './simulacao/taticas';
 
 const q = new URLSearchParams(location.search);
 const modo = q.get('modo');
@@ -21,7 +22,7 @@ else if (modo === 'solo') void iniciarQuest(app, { modo: 'solo', tipoCanal });
 else if (modo === 'laboratorio') {
   // testes automáticos da simulação: a luta sem desenho, controlada pelo teste
   void prepararFisica().then(() => {
-    (window as unknown as { __lab: unknown }).__lab = { Luta, protocolo, regras, corpoUrso };
+    (window as unknown as { __lab: unknown }).__lab = { Luta, protocolo, regras, corpoUrso, taticas };
     app.textContent = 'laboratório pronto';
   });
 }

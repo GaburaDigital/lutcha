@@ -19,6 +19,7 @@ import { abrirCanal, type Canal } from '../rede/canal';
 import { AGUA, CATAPULTA, TIPOS_FORMACAO, codigoDeSala, saidaCatapulta, type AtaqueImpacto, type TipoFormacao } from '../simulacao/regras';
 import { Formacoes, Onomatopeias, Piranbenjas, UrsoDeFora, criarCena, criarRingue } from './visual';
 import { T } from '../textos';
+import { ligarTecnico } from './tecnico_pc'; // táticas do técnico (conversa "Programação por blocos")
 
 export interface ConfigPcSolo { urso: JeitoUrso; clones: Comportamento; iniciais: number; ajudas: boolean }
 const JEITOS: JeitoUrso[] = ['parado', 'bobo', 'ofensivo'];
@@ -104,6 +105,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
   // só nesta tela: um anel aqua no chão marca o original (o jogador sabe quem ele é; o Quest nunca sabe)
   const marca = new THREE.Mesh(new THREE.RingGeometry(0.26, 0.34, 12), new THREE.MeshBasicMaterial({ color: '#4fd6d0', side: THREE.DoubleSide }));
   marca.rotation.x = -Math.PI / 2; cena.add(marca);
+  ligarTecnico(luta, raiz, cena); // teclas 1–5, U I O P, Tab e G; painel do técnico
 
   // ---------- rede (só no modo de rede) ----------
   let canal: Canal | null = null;

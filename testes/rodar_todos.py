@@ -4,7 +4,7 @@ import subprocess, sys, os, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from base import servidor, RAIZ
 
-TESTES = ['teste_simulacao.py', 'teste_pc_solo.py', 'teste_rede.py', 'teste_patas.py']
+TESTES = ['teste_simulacao.py', 'teste_taticas.py', 'teste_pc_solo.py', 'teste_rede.py', 'teste_patas.py']
 aqui = os.path.dirname(os.path.abspath(__file__))
 print('montando (npm run build)...'); subprocess.run(['npm', 'run', 'build'], cwd=RAIZ, check=True, stdout=subprocess.DEVNULL)
 falhas = []
