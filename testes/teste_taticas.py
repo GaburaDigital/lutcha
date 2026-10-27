@@ -31,11 +31,11 @@ with servidor(), sync_playwright() as p:
     r = S(pg, """const c = __lab.taticas.conferirTatica, base = (regras) => ({ versao: 1, nome: { pt: 'a', en: 'a' }, somar: true, regras });
       const regra = { quando: { b: 'sempre' }, quem: [{ b: 'clones' }], se: [], fazer: [{ b: 'aproximar' }] };
       return { desconhecido: c(base([{ ...regra, fazer: [{ b: 'explodir' }] }])).ok,
-        codigo: c(base([{ ...regra, fazer: ['alert(1)'] }])).ok,
+        codigo: c(base([{ ...regra, fazer: ['alert(1)'] }])).ok, mira: c(base([{ ...regra, fazer: [{ b: 'atacar', ataque: 'soco', mirar: 'rabo' }] }])).ok,
         demais: c(base(Array(17).fill(regra))).ok, cabe: c(base(Array(16).fill(regra))).ok,
         faixa: c(base([{ ...regra, quem: [{ b: 'pertoDoUrso', m: 999 }] }])).tatica.regras[0].quem[0].m,
         prontas: __lab.taticas.TATICAS_PRONTAS.map((t) => { const x = c(JSON.parse(JSON.stringify(t))); return x.ok ? x.blocos : x.erro; }) };""")
-    confere('conferência recusa bloco desconhecido e código', not r['desconhecido'] and not r['codigo'], r)
+    confere('conferência recusa bloco desconhecido, código e mira inválida', not r['desconhecido'] and not r['codigo'] and not r['mira'], r)
     confere('limite de 50 blocos', not r['demais'] and r['cabe'], r)
     confere('valor fora da faixa é limitado', r['faixa'] == 12, r)
     confere('táticas prontas passam na conferência (até 50 blocos)', all(isinstance(x, int) and x <= 50 for x in r['prontas']), r['prontas'])
@@ -58,22 +58,24 @@ with servidor(), sync_playwright() as p:
 
     # 4) sinal: só vale depois da tecla e por alguns segundos
     r = S(pg, """s.nova(); s.alinhar(); s.tec(0.5); const [c] = s.clone();
-      s.tatica([{ quando: { b: 'sinal', sinal: 2, dura: 2 }, quem: [{ b: 'clones' }], se: [], fazer: [{ b: 'irPara', x: 4, z: 2.5 }] }]);
+      s.tatica([{ quando: { b: 'sinal', sinal: 2, dura: 2 }, quem: [{ b: 'clones' }], se: [], fazer: [{ b: 'irPara', x: 4, z: 2.5 }] },
+                { quando: { b: 'sempre' }, quem: [{ b: 'clones' }], se: [], fazer: [{ b: 'parar' }] }], false);
       const a = s.pos(c); s.passos(60); const antes = s.pos(c).x - a.x;
       s.t.sinal(2); s.passos(120); const depois = s.pos(c).x - a.x;
       s.passos(180); const o = s.l.foto().piranbenjas.find((p) => p.numero === c); return { antes, depois, ordensDepois: s.t.tatica ? 1 : 0 };""")
     confere('sinal: nada antes da tecla, anda depois', abs(r['antes']) < 0.2 and r['depois'] > 1.0, r)
 
     # 5) grupos: clones novos vão para o grupo escolhido e continuam nele depois do sorteio dos números
-    r = S(pg, """s.nova({ clonesIniciais: 2 }); s.alinhar(); const t = s.tec(0.5); s.passos(20);
-      const velhos = s.clone(); const gVelhos = velhos.map((n) => t.grupoDe(n));
+    r = S(pg, """s.nova({ clonesIniciais: 2 }); s.alinhar(); const t = s.tec(0.5);
+      s.tatica([{ quando: { b: 'sempre' }, quem: [{ b: 'grupo', grupo: 'beta' }], se: [], fazer: [{ b: 'irPara', x: 4, z: -4 }] },
+                { quando: { b: 'sempre' }, quem: [{ b: 'grupo', grupo: 'alpha' }], se: [], fazer: [{ b: 'parar' }] }]);
+      s.passos(20); const velhos = s.clone(); const gVelhos = velhos.map((n) => t.grupoDe(n));
       t.grupoDosNovos = 'beta'; s.l.agua = 100; s.l.testeCriarClones(3, false); s.passos(20);
-      const contagem = t.contarGrupos(); s.passos(60); const depois = t.contarGrupos();
-      s.tatica([{ quando: { b: 'sempre' }, quem: [{ b: 'grupo', grupo: 'beta' }], se: [], fazer: [{ b: 'irPara', x: 4, z: -4 }] }]);
+      const contagem = t.contarGrupos(); s.passos(20); const depois = t.contarGrupos();
       const alvo = (n) => Math.hypot(s.pos(n).x - 4, s.pos(n).z + 4);
       const antes = Object.fromEntries(s.clone().map((n) => [n, alvo(n)])); s.passos(360);
       const mud = s.clone().map((n) => ({ g: t.grupoDe(n), chegou: antes[n] - alvo(n) }));
-      return { gVelhos, contagem, depois, betaAndou: mud.filter((x) => x.g === 'beta' && x.chegou > 2).length, alphaParado: mud.filter((x) => x.g === 'alpha' && Math.abs(x.chegou) < 0.3).length };""")
+      return { gVelhos, contagem, depois, mud, betaAndou: mud.filter((x) => x.g === 'beta' && x.chegou > 2).length, alphaParado: mud.filter((x) => x.g === 'alpha' && Math.abs(x.chegou) < 0.3).length };""")
     confere('clones antigos no alpha, novos no beta', r['gVelhos'] == ['alpha', 'alpha'] and r['contagem']['beta'] == 3 and r['depois']['beta'] == 3, r)
     confere('regra do grupo beta só move o beta', r['betaAndou'] == 3 and r['alphaParado'] == 2, r)
 
@@ -107,6 +109,43 @@ with servidor(), sync_playwright() as p:
         out.push({ ordensAtaque, golpes: ev.filter((e) => e.tipo === 'ursoGolpeado').length, formacoes: ev.filter((e) => e.tipo === 'formacao').length });
       } return out;""")
     confere('táticas prontas rodam, mandam atacar e batem no urso', all(x['ordensAtaque'] > 20 for x in r) and sum(x['golpes'] for x in r) >= 10, r)
+
+    # 11) blocos novos (C28): rolar, distrair, mirar, gritar, criar clones (e o "pode gerar clones" desligado)
+    r = S(pg, """s.nova({ clonesIniciais: 3 }); s.alinhar(); s.tec(0.5); const cs = s.clone(); let vista = null;
+      const cer = s.t.cerebro; s.l.definirCerebro((v) => { const d = cer(v); vista = { v, d }; return d; });
+      s.tatica([{ quando: { b: 'sempre' }, quem: [{ b: 'maisPertoDoUrso', n: 1 }, { b: 'clones' }], se: [], fazer: [{ b: 'distrair', tipo: 'dancinha' }] },
+                { quando: { b: 'sempre' }, quem: [{ b: 'clones' }], se: [], fazer: [{ b: 'atacar', ataque: 'soco', mirar: 'pernas' }, { b: 'gritar', palavra: 5 }] }]);
+      const ev = s.passos(120); const d = vista.d, ords = Object.values(d.ordens);
+      const dancando = vista.v.clones.filter((c) => c.distracao === 'dancinha').length;
+      return { dancando, mirando: ords.filter((o) => o.atacar === 'soco' && o.mirar === 'pernas').length, falas: ev.filter((e) => e.tipo === 'fala' && e.palavra === 5).length };""")
+    confere('distrair, mirar e gritar chegam na luta', r['dancando'] == 1 and r['mirando'] >= 1 and r['falas'] >= 1, r)
+    r = S(pg, """s.nova({ clonesIniciais: 2 }); s.alinhar(); s.tec(0.5); const cs = s.clone(); s.l.testeColocar(cs[0], { x: 0.3, y: 0.47, z: 2.4 });
+      s.tatica([{ quando: { b: 'sempre' }, quem: [{ b: 'clones' }], se: [], fazer: [{ b: 'rolar' }] }]);
+      let rolou = false; s.passos(90, () => { if (s.l.foto().piranbenjas.some((p) => p.estado === 'rolando')) rolou = true; }); return rolou;""")
+    confere('rolar pela tática', r, r)
+    js_criar = """s.nova({ clonesIniciais: 1 }); s.l.agua = 100; s.tec(0.5); const antes = s.l.testeNumeros().length;
+      const r = __lab.taticas.conferirTatica({ versao: 1, nome: { pt: 'c', en: 'c' }, somar: true, original: { gerarClones: GERAR, usarItens: true },
+        regras: [{ quando: { b: 'comeco', dura: 1 }, quem: [{ b: 'todos' }], se: [], fazer: [{ b: 'criarClones', quantos: 3, simples: true }] }] });
+      s.t.trocar(r.tatica); s.passos(90); return s.l.testeNumeros().length - antes;"""
+    com = S(pg, js_criar.replace('GERAR', 'true')); sem = S(pg, js_criar.replace('GERAR', 'false'))
+    confere('criar clones pela tática (e respeita "pode gerar clones")', com == 3 and sem == 0, {'com': com, 'sem': sem})
+
+    # 12) formação perto do urso, só com o grupo beta
+    r = S(pg, """s.nova({ clonesIniciais: 6 }); const t = s.tec(0.5); s.passos(5);
+      s.clone().slice(0, 4).forEach((n) => t.pintar(n, 'beta')); const beta = new Set(s.clone().filter((n) => t.grupoDe(n) === 'beta'));
+      s.tatica([{ quando: { b: 'sempre' }, quem: [{ b: 'todos' }], se: [], fazer: [{ b: 'formar', tipo: 'muralha', perto: 'urso', grupo: 'beta' }] }]);
+      s.passos(200); const f = s.l.foto().formacoes[0], u = s.l.entradaUrso.cabeca;
+      return { tipo: f?.tipo, perto: f ? Math.hypot(f.centro.x - u.x, f.centro.z - u.z) : 99, beta: beta.size };""")
+    confere('muralha perto do urso com o grupo beta', r['tipo'] == 'muralha' and r['perto'] < 3.5 and r['beta'] == 4, r)
+
+    # 13) IA esperta dos complexos (tática só com "pensar sozinho") tira bem mais do urso ofensivo que a IA mínima cautelosa
+    r = S(pg, """const medir = (esperto) => { let perdida = 0, vivos = 0;
+        for (let k = 1; k <= 3; k++) { s.nova({ clonesIniciais: 8, ursoBot: 'ofensivo', comportamento: 'cautelosos', semente: k * 11 });
+          if (esperto) { let q = k; s.t = new __lab.taticas.Tecnico(() => { q = (q * 1103515245 + 12345) % 2147483648; return q / 2147483648; }); s.l.definirCerebro(s.t.cerebro); s.t.trocar(__lab.taticas.conferirTatica({ versao: 1, nome: { pt: 'e', en: 'e' }, somar: true, regras: [{ quando: { b: 'sempre' }, quem: [{ b: 'complexos' }], se: [], fazer: [{ b: 'esperto' }] }] }).tatica); }
+          let min = 100; s.passos(2400, () => { min = Math.min(min, s.l.foto().urso.res); }); perdida += 100 - min; vivos += s.l.foto().piranbenjas.length - 1; }
+        return { perdida, vivos }; };
+      return { minima: medir(false), esperta: medir(true) };""")
+    confere('IA esperta dos complexos é mais perigosa que a IA mínima', r['esperta']['perdida'] > 2 * max(5, r['minima']['perdida']) and r['esperta']['vivos'] >= 6, r)
 
     # 10) tela do PC: painel do técnico, teclas 1–5, Tab e G
     pg.goto(URL + '?modo=pcsolo&urso=parado&iniciais=4'); pg.wait_for_function('() => window.__tecnico', timeout=60000)

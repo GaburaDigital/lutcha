@@ -22,6 +22,7 @@ export interface TecnicoPC { tecnico: Tecnico; slots: (Tatica | null)[]; ativa: 
 export function ligarTecnico(luta: Luta, raiz: HTMLElement, cena: THREE.Scene): TecnicoPC {
   const tecnico = new Tecnico();
   luta.definirCerebro(tecnico.cerebro);
+  tecnico.automatico = !!luta.opcoes.originalAutomatico;
   const slots: (Tatica | null)[] = TATICAS_PRONTAS.slice(0, 5);
   const estado: TecnicoPC = { tecnico, slots, ativa: 0, automatico: !!luta.opcoes.originalAutomatico, parar };
   const nome = (t: Tatica) => (LINGUA === 'en' ? t.nome.en : t.nome.pt);
@@ -60,7 +61,7 @@ export function ligarTecnico(luta: Luta, raiz: HTMLElement, cena: THREE.Scene): 
     const k = e.key.toLowerCase();
     if (k >= '0' && k <= '5' && k.length === 1) { trocar(Number(k)); return; }
     const s = TECLAS_SINAIS.indexOf(k); if (s >= 0) { tecnico.sinal(s); return; }
-    if (k === 'tab') { e.preventDefault(); estado.automatico = !estado.automatico; luta.opcoes.originalAutomatico = estado.automatico; desenharPainel(); return; }
+    if (k === 'tab') { e.preventDefault(); estado.automatico = !estado.automatico; luta.opcoes.originalAutomatico = estado.automatico; tecnico.automatico = estado.automatico; desenharPainel(); return; }
     if (k === 'g') { tecnico.grupoDosNovos = GRUPOS[(GRUPOS.indexOf(tecnico.grupoDosNovos) + 1) % GRUPOS.length]; desenharPainel(); }
   }
   addEventListener('keydown', aoTeclar);
