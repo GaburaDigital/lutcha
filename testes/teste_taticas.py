@@ -27,18 +27,22 @@ with servidor(), sync_playwright() as p:
     pg.goto(URL + '?modo=laboratorio'); pg.wait_for_function('() => window.__lab', timeout=60000)
     pg.evaluate('() => {' + AJUDA + '}')
 
-    # 1) conferência: bloco desconhecido, código no lugar de bloco, limite de blocos, valores fora da faixa
+    # 1) conferência: bloco desconhecido, código no lugar de bloco, limite de blocos, encaixes demais, valores fora da faixa
     r = S(pg, """const c = __lab.taticas.conferirTatica, base = (regras) => ({ versao: 1, nome: { pt: 'a', en: 'a' }, somar: true, regras });
       const regra = { quando: { b: 'sempre' }, quem: [{ b: 'clones' }], se: [], fazer: [{ b: 'aproximar' }] };
+      const v2 = (n) => c({ versao: 2, nome: { pt: 'a', en: 'a' }, somar: true, regras: Array(n).fill({ quando: { b: 'sempre' }, corpo: [{ b: 'paraCada', filtro: { b: 'eu', s: 'complexo' }, corpo: [{ b: 'aproximar' }] }] }) }).ok;
+      const fundo = (n) => c({ versao: 2, nome: { pt: 'a', en: 'a' }, regras: [{ quando: { b: 'sempre' }, corpo: [{ b: 'se', cond: Array.from({ length: n }).reduce((x) => ({ b: 'nao', a: x }), { b: 'eu', s: 'livre' }), entao: [] }] }] }).ok;
       return { desconhecido: c(base([{ ...regra, fazer: [{ b: 'explodir' }] }])).ok,
         codigo: c(base([{ ...regra, fazer: ['alert(1)'] }])).ok, mira: c(base([{ ...regra, fazer: [{ b: 'atacar', ataque: 'soco', mirar: 'rabo' }] }])).ok,
-        demais: c(base(Array(17).fill(regra))).ok, cabe: c(base(Array(16).fill(regra))).ok,
-        faixa: c(base([{ ...regra, quem: [{ b: 'pertoDoUrso', m: 999 }] }])).tatica.regras[0].quem[0].m,
+        reporter: c({ versao: 2, nome: { pt: 'a', en: 'a' }, regras: [{ quando: { b: 'sempre' }, corpo: [{ b: 'se', cond: { b: 'compara', op: '<', a: { valor: 'senha' }, c: { n: 1 } }, entao: [] }] }] }).ok,
+        cabe: v2(20), demais: v2(21), fundoOk: fundo(8), fundoDemais: fundo(14),
+        faixa: c(base([{ ...regra, fazer: [{ b: 'rodear', m: 999, sentido: 1 }] }])).tatica.regras[0].corpo[0].corpo[0].m,
+        formato1: c(base([regra])).tatica.versao,
         prontas: __lab.taticas.TATICAS_PRONTAS.map((t) => { const x = c(JSON.parse(JSON.stringify(t))); return x.ok ? x.blocos : x.erro; }) };""")
-    confere('conferência recusa bloco desconhecido, código e mira inválida', not r['desconhecido'] and not r['codigo'] and not r['mira'], r)
-    confere('limite de 50 blocos', not r['demais'] and r['cabe'], r)
-    confere('valor fora da faixa é limitado', r['faixa'] == 12, r)
-    confere('táticas prontas passam na conferência (até 50 blocos)', all(isinstance(x, int) and x <= 50 for x in r['prontas']), r['prontas'])
+    confere('conferência recusa bloco desconhecido, código, mira e repórter inválidos', not r['desconhecido'] and not r['codigo'] and not r['mira'] and not r['reporter'], r)
+    confere('limite de 80 blocos e de encaixes', r['cabe'] and not r['demais'] and r['fundoOk'] and not r['fundoDemais'], r)
+    confere('valor fora da faixa é limitado; formato 1 vira formato 2', r['faixa'] == 5 and r['formato1'] == 2, r)
+    confere('táticas prontas passam na conferência (até 80 blocos)', all(isinstance(x, int) and x <= 80 for x in r['prontas']), r['prontas'])
 
     # 2) somar regras: ligado soma os movimentos (diagonal); desligado vale só a primeira regra
     js_somar = """s.nova(); s.alinhar(); s.tec(0.5); const [c] = s.clone();
@@ -146,6 +150,25 @@ with servidor(), sync_playwright() as p:
         return { perdida, vivos }; };
       return { minima: medir(false), esperta: medir(true) };""")
     confere('IA esperta dos complexos é mais perigosa que a IA mínima', r['esperta']['perdida'] > 2 * max(5, r['minima']['perdida']) and r['esperta']['vivos'] >= 6, r)
+
+    # 14) formato 2 (C29): se/senão com repórter, "e", "entrar no grupo" e ação do time fora do "para cada"
+    r = S(pg, """s.nova({ clonesIniciais: 4 }); s.alinhar(); const t = s.tec(0.5); const cs = s.clone(); s.passos(5);
+      s.l.testeColocar(cs[0], { x: 0.4, y: 0.47, z: 1.6 }); cs.slice(1).forEach((n, i) => s.l.testeColocar(n, { x: -2 + i * 0.8, y: 0.47, z: -1.5 })); s.passos(2);
+      const r = __lab.taticas.conferirTatica({ versao: 2, nome: { pt: 's', en: 's' }, somar: true, regras: [
+        { quando: { b: 'sempre' }, corpo: [
+          { b: 'paraCada', filtro: { b: 'nao', a: { b: 'eu', s: 'original' } }, corpo: [
+            { b: 'se', cond: { b: 'e', a: { b: 'eu', s: 'complexo' }, c: { b: 'compara', op: '<', a: { valor: 'minhaDistancia' }, c: { n: 2 } } },
+              entao: [{ b: 'entrarGrupo', grupo: 'gamma' }, { b: 'parar' }],
+              senao: [{ b: 'irPara', x: -4, z: -4 }] }] },
+          { b: 'gritar', palavra: 7 }] }] });
+      s.t.trocar(r.tatica); const ev = s.passos(120);
+      return { ok: r.ok, perto: t.grupoDe(cs[0]), longe: cs.slice(1).map((n) => t.grupoDe(n)), falou: ev.filter((e) => e.tipo === 'fala' && e.palavra === 7).length,
+        andou: cs.slice(1).filter((n) => Math.hypot(s.pos(n).x + 4, s.pos(n).z + 4) < 3.5).length };""")
+    confere('se/senão com repórter, "e" e entrar no grupo', r['ok'] and r['perto'] == 'gamma' and all(g == 'alpha' for g in r['longe']) and r['andou'] >= 2, r)
+    confere('ação do time fora do "para cada" (gritar)', r['falou'] >= 1, r)
+    r = S(pg, """s.nova({ clonesIniciais: 4 }); s.alinhar(); const t = s.tec(0.5); s.passos(5); const ps = s.l.foto().piranbenjas.map((p) => ({ numero: p.numero, pos: p.pos }));
+      t.mudarQuantidade('beta', 1, ps); t.mudarQuantidade('beta', 1, ps); const dois = t.contarGrupos().beta; t.mudarQuantidade('beta', -1, ps); return { dois, um: t.contarGrupos().beta };""")
+    confere('mini-grade: + e − mudam a quantidade do grupo', r['dois'] == 2 and r['um'] == 1, r)
 
     # 10) tela do PC: painel do técnico, teclas 1–5, Tab e G
     pg.goto(URL + '?modo=pcsolo&urso=parado&iniciais=4'); pg.wait_for_function('() => window.__tecnico', timeout=60000)

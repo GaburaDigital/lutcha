@@ -4,17 +4,26 @@
 // O Tecnico entrega um "cérebro" para luta.definirCerebro (D-501). A física continua sendo da Luta:
 // aqui só se decide para onde cada clone vai e o que ele tenta fazer.
 //
-// Regras do técnico (D-300 a D-302): chapéu (quando) + quem + condições + ações.
-// - "Somar regras" ligado: o clone soma os movimentos de todas as regras que servem para ele; ações que brigam
-//   entre si (atacar, parar, rolar, distrair, catapulta, "pensar sozinho") não se somam: vale a regra mais alta.
-// - "Somar regras" desligado: vale só a primeira regra que serve.
+// Formato 2 (C29), no jeito do Scratch:
+// - chapéu: "quando [sempre / sinal U, I, O, P / a tática começa]", com uma pilha de comandos embaixo;
+// - comandos: "para cada clone que ⟨…⟩" e "se ⟨…⟩ então … senão …" (blocos em C) e as ações;
+// - condições são blocos hexagonais (verdadeiro ou falso): ⟨o urso está sentado⟩, ⟨eu sou complexo⟩,
+//   ⟨(…) < (…)⟩, ⟨… e …⟩, ⟨… ou …⟩, ⟨não …⟩, ⟨com chance de (30)%⟩;
+// - números são repórteres redondos: (resistência do urso), (minha distância ao urso), (água)…
+// A pilha de cada chapéu é lida para cada clone (e para o original no automático): as condições sobre "eu"
+// valem para o clone que está pensando, e as ações alcançadas são as dele. Ações do time (montar formação,
+// criar clones, gritar) valem uma vez para todos.
+// Regras do técnico (D-300 a D-302):
+// - "Somar regras" ligado: o clone soma os movimentos de todos os chapéus que deram alguma ação para ele; ações
+//   que brigam entre si (atacar, parar, rolar, distrair, catapulta, "pensar sozinho") não se somam: vale a mais alta.
+// - "Somar regras" desligado: vale só o primeiro chapéu (de cima para baixo) que deu alguma ação para o clone.
 // - Cada clone reage com atraso (0,2 a 1,2 s) e obedece ~80% das vezes (D-091); sem ordem, segue a IA mínima.
 // - O original no automático recebe as ordens como qualquer clone, sem proteção especial (D-324).
-// - IA esperta (C28): com uma tática ligada, clone complexo (e o original no automático) sem regra que sirva, ou com o
-//   bloco "pensar sozinho", decide sozinho: rodeia
-//   para as costas do urso, ataca em turnos as pernas, chuta o urso sentado, cabeceia o urso no ar, aproveita
-//   quando ele agarra ou fica tonto, empurra para a borda e foge quando está machucado.
-// C28: cada clone tem um código fixo (D-327); os grupos seguem o código, sem reconhecer pela posição.
+// - IA esperta (C28): com uma tática ligada, clone complexo (e o original no automático) sem nenhuma ação, ou com
+//   o bloco "pensar sozinho", decide sozinho: rodeia para as costas do urso, ataca em turnos as pernas, chuta o
+//   urso sentado, cabeceia o urso no ar, aproveita quando ele agarra ou fica tonto, empurra para a borda e foge
+//   quando está machucado.
+// O formato 1 (rodada 1: quem / se / faça) continua aceito: é convertido para o formato 2 na conferência.
 
 import type { AtaquePB, Cerebro, DecisaoTatica, OrdemClone, PedidoFormacao, VisaoTatica } from './luta';
 import { DISTRACOES, MIRAS, PIRANBENJA, RINGUE, TIPOS_FORMACAO, TOTAL_PALAVRAS, type Distracao, type Mira, type TipoFormacao, type V3 } from './regras';
@@ -23,7 +32,9 @@ export const GRUPOS = ['alpha', 'beta', 'gamma', 'sigma'] as const;
 export type Grupo = typeof GRUPOS[number];
 /** Cores dos grupos (só no PC). */
 export const COR_GRUPO: Record<Grupo, string> = { alpha: '#4f9bff', beta: '#ff9a3d', gamma: '#5fd35f', sigma: '#b07cff' };
-export const MAX_BLOCOS = 50;          // D-305 (teste)
+/** Blocos por tática (D-305). Contam comandos, condições e repórteres; números digitados não contam. */
+export const MAX_BLOCOS = 80;
+export const MAX_FUNDO = 12;           // encaixes um dentro do outro
 export const PENSAR_A_CADA = 0.25;     // s (a Luta pergunta neste ritmo)
 export const REACAO = { min: 0.2, max: 1.2, simples: 1.3 }; // D-091; clone simples reage 30% mais devagar
 export const OBEDIENCIA = 0.8;         // D-091
@@ -37,51 +48,46 @@ export const RECUAR_DEPOIS = 1.5;      // s recuando depois de "atacar e depois 
 /** IA esperta (C28): quantos complexos atacam ao mesmo tempo, distância de espera e quando fugir. */
 export const ESPERTO = { atacantes: 5, espera: 1.6, machucado: 0.4, borda: 2, ursoFraco: 25, morderAte: 30 };
 
-/** Palavras-código dos sinais (aprovadas em C26); o nome pertence à tecla, não à tática. */
-export const PALAVRAS_CODIGO: { pt: string; en: string }[] = [
-  { pt: 'Tubarão Relâmpago', en: 'Lightning Shark' }, { pt: 'Abacaxi Supremo', en: 'Supreme Pineapple' },
-  { pt: 'Pastel Dimensional', en: 'Dimensional Pastry' }, { pt: 'Torpedo de Sushi', en: 'Sushi Torpedo' },
-  { pt: 'Olhar do Baiacu', en: 'Pufferfish Glare' }, { pt: 'Despertar das Barbatanas', en: 'Fin Awakening' },
-  { pt: 'Tempestade de Escamas', en: 'Scale Storm' }, { pt: 'Ninja de Aquário', en: 'Aquarium Ninja' },
-  { pt: 'Kaiju de Bolso', en: 'Pocket Kaiju' }, { pt: 'Rugido do Mar Profundo', en: 'Deep Sea Roar' },
-  { pt: 'Punho do Bolinho de Arroz', en: 'Rice Ball Fist' }, { pt: 'Lâmina da Maré Final', en: 'Final Tide Blade' },
-];
-
 // ---------------- os blocos (lista fechada) ----------------
 export type Chapeu =
   | { b: 'sempre' }
   | { b: 'sinal'; sinal: number; dura?: number }    // sinal 0..3 (teclas U, I, O, P)
   | { b: 'comeco'; dura?: number };                 // nos primeiros segundos da tática
-export type Quem =
-  | { b: 'todos' } | { b: 'clones' } | { b: 'original' }
-  | { b: 'complexos' } | { b: 'simples' } | { b: 'armadilhas' }
-  | { b: 'grupo'; grupo: Grupo }
-  | { b: 'pertoDoUrso'; m: number } | { b: 'longeDoUrso'; m: number } | { b: 'pertoDoOriginal'; m: number }
-  | { b: 'maisPertoDoUrso'; n: number }
-  | { b: 'acabouDeNascer'; s: number } | { b: 'nascidoHa'; s: number }
-  | { b: 'machucado' } | { b: 'grudados' } | { b: 'noAr' }
-  | { b: 'atrasDoUrso' } | { b: 'frenteDoUrso' }
-  | { b: 'livre' };                                  // não está tonto, caído, voando nem em formação
-export type Cond =
-  | { b: 'ursoSentado' } | { b: 'ursoTonto' } | { b: 'ursoNoAr' } | { b: 'ursoAgarrando' }
-  | { b: 'ursoFraco'; res: number } | { b: 'ursoNaBorda'; m: number } | { b: 'equilibrio'; maisDe: number }
-  | { b: 'ursoFurioso' } | { b: 'ursoHumano' }       // D-307: o urso ainda não tem esses modos (sempre falso)
-  | { b: 'originalMachucado'; res: number } | { b: 'originalNoAr' }
-  | { b: 'agua'; maisDe: number } | { b: 'clonesVivos'; maisDe: number } | { b: 'tempo'; maisDe: number }
-  | { b: 'temFormacao'; tipo: TipoFormacao } | { b: 'chance'; pct: number }
-  | { b: 'nao'; c: Cond } | { b: 'ou'; a: Cond; c: Cond };
+/** Repórteres redondos (números). */
+export const VALORES = ['ursoRes', 'ursoEquilibrio', 'ursoBorda', 'agua', 'clonesVivos', 'tempo',
+  'minhaDistancia', 'minhaRes', 'minhaIdade', 'distanciaOriginal', 'originalRes'] as const;
+export type Valor = typeof VALORES[number];
+export type Num = { n: number } | { valor: Valor };
+/** Condições sobre o urso e o original. */
+export const SENSORES = ['ursoSentado', 'ursoTonto', 'ursoNoAr', 'ursoAgarrando', 'ursoFurioso', 'ursoHumano', 'originalNoAr'] as const;
+export type Sensor = typeof SENSORES[number];
+/** Condições sobre o clone que está pensando ("eu"). */
+export const EU = ['complexo', 'simples', 'armadilha', 'original', 'livre', 'machucado', 'grudado', 'noAr', 'atrasDoUrso', 'frenteDoUrso'] as const;
+export type Eu = typeof EU[number];
+/** Blocos hexagonais (verdadeiro ou falso). */
+export type Bool =
+  | { b: 'e' | 'ou'; a: Bool; c: Bool } | { b: 'nao'; a: Bool }
+  | { b: 'compara'; op: '<' | '>' | '='; a: Num; c: Num }
+  | { b: 'sensor'; s: Sensor } | { b: 'eu'; s: Eu } | { b: 'grupo'; grupo: Grupo }
+  | { b: 'maisPerto'; n: number } | { b: 'formacao'; tipo: TipoFormacao }
+  | { b: 'chance'; pct: number; id?: number };     // id: posição do bloco (sorteio estável por clone)
 export type Acao =
   | { b: 'atacar'; ataque: AtaquePB; mirar?: Mira; depois?: 'recuar' }
   | { b: 'aproximar' } | { b: 'recuar' } | { b: 'parar' } | { b: 'rolar' }
   | { b: 'rodear'; m: number; sentido: 1 | -1 }
   | { b: 'juntarNoOriginal' } | { b: 'espalhar' } | { b: 'irPara'; x: number; z: number }
   | { b: 'catapulta' } | { b: 'distrair'; tipo: Distracao } | { b: 'esperto' }
+  | { b: 'entrarGrupo'; grupo: Grupo }
   | { b: 'formar'; tipo: TipoFormacao; perto?: 'urso' | 'original'; grupo?: Grupo }
   | { b: 'criarClones'; quantos: number; simples: boolean }
   | { b: 'gritar'; palavra: number };
-export interface Regra { quando: Chapeu; quem: Quem[]; se: Cond[]; fazer: Acao[] }
+/** Comandos: as ações e os dois blocos em C. Condição vazia: "para cada" vale para todos; "se" não entra. */
+export type Comando = Acao
+  | { b: 'paraCada'; filtro: Bool | null; corpo: Comando[] }
+  | { b: 'se'; cond: Bool | null; entao: Comando[]; senao?: Comando[] };
+export interface Regra { quando: Chapeu; corpo: Comando[] }
 /** original: checkboxes do Quadro para o original no automático (D-310). */
-export interface Tatica { versao: 1; nome: { pt: string; en: string }; somar: boolean; original: { gerarClones: boolean; usarItens: boolean }; regras: Regra[] }
+export interface Tatica { versao: 2; nome: { pt: string; en: string }; somar: boolean; original: { gerarClones: boolean; usarItens: boolean }; regras: Regra[] }
 
 // ---------------- conferência (nada fora da lista passa) ----------------
 type Resultado = { ok: true; tatica: Tatica; blocos: number } | { ok: false; erro: string };
@@ -96,92 +102,153 @@ const numero = (x: unknown, min: number, max: number, onde: string, padrao?: num
 const umDe = <T extends string>(x: unknown, lista: readonly T[], onde: string): T => { if (!lista.includes(x as T)) throw new Recusa(`${onde}: valor fora da lista`); return x as T; };
 const texto = (x: unknown, onde: string): string => { if (typeof x !== 'string') throw new Recusa(`${onde}: texto inválido`); return x.slice(0, 40); };
 
-function conferirChapeu(x: unknown): Chapeu {
-  const o = obj(x, 'quando');
-  if (o.b === 'sempre') return { b: 'sempre' };
-  if (o.b === 'sinal') return { b: 'sinal', sinal: Math.round(numero(o.sinal, 0, 3, 'sinal')), dura: numero(o.dura, 0.5, 10, 'sinal', DURA_SINAL) };
-  if (o.b === 'comeco') return { b: 'comeco', dura: numero(o.dura, 0.5, 30, 'começo', DURA_COMECO) };
-  throw new Recusa('quando: bloco desconhecido');
-}
-function conferirQuem(x: unknown): Quem {
-  const o = obj(x, 'quem');
-  switch (o.b) {
-    case 'todos': case 'clones': case 'original': case 'complexos': case 'simples': case 'armadilhas': case 'livre':
-    case 'machucado': case 'grudados': case 'noAr': case 'atrasDoUrso': case 'frenteDoUrso': return { b: o.b };
-    case 'grupo': return { b: 'grupo', grupo: umDe(o.grupo, GRUPOS, 'grupo') };
-    case 'pertoDoUrso': case 'longeDoUrso': case 'pertoDoOriginal': return { b: o.b, m: numero(o.m, 0.5, 12, String(o.b)) };
-    case 'maisPertoDoUrso': return { b: 'maisPertoDoUrso', n: Math.round(numero(o.n, 1, 30, 'mais perto')) };
-    case 'acabouDeNascer': case 'nascidoHa': return { b: o.b, s: numero(o.s, 0.5, 120, String(o.b)) };
+/** Leitor com contagem de blocos e de encaixes. */
+class Leitor {
+  blocos = 0; chances = 0;
+  chapeu(x: unknown): Chapeu {
+    const o = obj(x, 'quando');
+    if (o.b === 'sempre') return { b: 'sempre' };
+    if (o.b === 'sinal') return { b: 'sinal', sinal: Math.round(numero(o.sinal, 0, 3, 'sinal')), dura: numero(o.dura, 0.5, 10, 'sinal', DURA_SINAL) };
+    if (o.b === 'comeco') return { b: 'comeco', dura: numero(o.dura, 0.5, 30, 'começo', DURA_COMECO) };
+    throw new Recusa('quando: bloco desconhecido');
   }
-  throw new Recusa('quem: bloco desconhecido');
-}
-function conferirCond(x: unknown, fundo = 0): Cond {
-  if (fundo > 4) throw new Recusa('condição: encaixes demais');
-  const o = obj(x, 'se');
-  switch (o.b) {
-    case 'ursoSentado': case 'ursoTonto': case 'ursoNoAr': case 'ursoAgarrando': case 'ursoFurioso': case 'ursoHumano': case 'originalNoAr': return { b: o.b };
-    case 'ursoFraco': return { b: 'ursoFraco', res: numero(o.res, 0, 100, 'urso fraco') };
-    case 'originalMachucado': return { b: 'originalMachucado', res: numero(o.res, 0, 100, 'original machucado') };
-    case 'ursoNaBorda': return { b: 'ursoNaBorda', m: numero(o.m, 0, RINGUE.raio, 'urso na borda') };
-    case 'equilibrio': case 'agua': return { b: o.b, maisDe: numero(o.maisDe, 0, 100, String(o.b)) };
-    case 'clonesVivos': return { b: 'clonesVivos', maisDe: Math.round(numero(o.maisDe, 0, 30, 'clones vivos')) };
-    case 'tempo': return { b: 'tempo', maisDe: numero(o.maisDe, 0, 900, 'tempo') };
-    case 'temFormacao': return { b: 'temFormacao', tipo: umDe(o.tipo, TIPOS_FORMACAO, 'formação') };
-    case 'chance': return { b: 'chance', pct: numero(o.pct, 0, 100, 'chance') };
-    case 'nao': return { b: 'nao', c: conferirCond(o.c, fundo + 1) };
-    case 'ou': return { b: 'ou', a: conferirCond(o.a, fundo + 1), c: conferirCond(o.c, fundo + 1) };
+  num(x: unknown, fundo: number): Num {
+    if (fundo > MAX_FUNDO) throw new Recusa('número: encaixes demais');
+    const o = obj(x, 'número');
+    if ('n' in o) return { n: numero(o.n, -1000, 1000, 'número') };
+    this.blocos++;
+    return { valor: umDe(o.valor, VALORES, 'repórter') };
   }
-  throw new Recusa('se: bloco desconhecido');
-}
-function conferirAcao(x: unknown): Acao {
-  const o = obj(x, 'fazer');
-  switch (o.b) {
-    case 'atacar': {
-      const a: Acao = { b: 'atacar', ataque: umDe(o.ataque, ATAQUES, 'ataque') };
-      if (o.mirar !== undefined) a.mirar = umDe(o.mirar, MIRAS, 'mirar');
-      if (o.depois === 'recuar') a.depois = 'recuar';
-      return a;
+  bool(x: unknown, fundo: number): Bool {
+    if (fundo > MAX_FUNDO) throw new Recusa('condição: encaixes demais');
+    const o = obj(x, 'condição');
+    this.blocos++;
+    switch (o.b) {
+      case 'e': case 'ou': return { b: o.b, a: this.bool(o.a, fundo + 1), c: this.bool(o.c, fundo + 1) };
+      case 'nao': return { b: 'nao', a: this.bool(o.a, fundo + 1) };
+      case 'compara': return { b: 'compara', op: umDe(o.op, ['<', '>', '='] as const, 'comparação'), a: this.num(o.a, fundo + 1), c: this.num(o.c, fundo + 1) };
+      case 'sensor': return { b: 'sensor', s: umDe(o.s, SENSORES, 'sensor') };
+      case 'eu': return { b: 'eu', s: umDe(o.s, EU, 'eu') };
+      case 'grupo': return { b: 'grupo', grupo: umDe(o.grupo, GRUPOS, 'grupo') };
+      case 'maisPerto': return { b: 'maisPerto', n: Math.round(numero(o.n, 1, 30, 'mais perto')) };
+      case 'formacao': return { b: 'formacao', tipo: umDe(o.tipo, TIPOS_FORMACAO, 'formação') };
+      case 'chance': return { b: 'chance', pct: numero(o.pct, 0, 100, 'chance'), id: this.chances++ };
     }
-    case 'aproximar': case 'recuar': case 'parar': case 'rolar': case 'juntarNoOriginal': case 'espalhar': case 'catapulta': case 'esperto': return { b: o.b };
-    case 'rodear': return { b: 'rodear', m: numero(o.m, 1, 5, 'rodear'), sentido: o.sentido === -1 ? -1 : 1 };
-    case 'irPara': return { b: 'irPara', x: numero(o.x, -RINGUE.raio, RINGUE.raio, 'ir para'), z: numero(o.z, -RINGUE.raio, RINGUE.raio, 'ir para') };
-    case 'distrair': return { b: 'distrair', tipo: umDe(o.tipo, DISTRACOES, 'distração') };
-    case 'formar': {
-      const a: Acao = { b: 'formar', tipo: umDe(o.tipo, TIPOS_FORMACAO, 'formação') };
-      if (o.perto !== undefined) a.perto = umDe(o.perto, ['urso', 'original'] as const, 'perto');
-      if (o.grupo !== undefined) a.grupo = umDe(o.grupo, GRUPOS, 'grupo');
-      return a;
-    }
-    case 'criarClones': return { b: 'criarClones', quantos: Math.round(numero(o.quantos, 1, 8, 'criar clones')), simples: o.simples === true };
-    case 'gritar': return { b: 'gritar', palavra: Math.round(numero(o.palavra, 0, TOTAL_PALAVRAS - 1, 'gritar')) };
+    throw new Recusa('condição: bloco desconhecido');
   }
-  throw new Recusa('fazer: bloco desconhecido');
-}
-const contarCond = (c: Cond): number => c.b === 'nao' ? 1 + contarCond(c.c) : c.b === 'ou' ? 1 + contarCond(c.a) + contarCond(c.c) : 1;
-export function contarBlocos(t: Tatica): number {
-  return t.regras.reduce((s, r) => s + 1 + r.quem.length + r.se.reduce((a, c) => a + contarCond(c), 0) + r.fazer.length, 0);
+  acao(o: Record<string, unknown>): Acao {
+    switch (o.b) {
+      case 'atacar': {
+        const a: Acao = { b: 'atacar', ataque: umDe(o.ataque, ATAQUES, 'ataque') };
+        if (o.mirar !== undefined && o.mirar !== '') a.mirar = umDe(o.mirar, MIRAS, 'mirar');
+        if (o.depois === 'recuar') a.depois = 'recuar';
+        return a;
+      }
+      case 'aproximar': case 'recuar': case 'parar': case 'rolar': case 'juntarNoOriginal': case 'espalhar': case 'catapulta': case 'esperto': return { b: o.b };
+      case 'rodear': return { b: 'rodear', m: numero(o.m, 1, 5, 'rodear'), sentido: o.sentido === -1 ? -1 : 1 };
+      case 'irPara': return { b: 'irPara', x: numero(o.x, -RINGUE.raio, RINGUE.raio, 'ir para'), z: numero(o.z, -RINGUE.raio, RINGUE.raio, 'ir para') };
+      case 'distrair': return { b: 'distrair', tipo: umDe(o.tipo, DISTRACOES, 'distração') };
+      case 'entrarGrupo': return { b: 'entrarGrupo', grupo: umDe(o.grupo, GRUPOS, 'grupo') };
+      case 'formar': {
+        const a: Acao = { b: 'formar', tipo: umDe(o.tipo, TIPOS_FORMACAO, 'formação') };
+        if (o.perto !== undefined) a.perto = umDe(o.perto, ['urso', 'original'] as const, 'perto');
+        if (o.grupo !== undefined && o.grupo !== '') a.grupo = umDe(o.grupo, GRUPOS, 'grupo');
+        return a;
+      }
+      case 'criarClones': return { b: 'criarClones', quantos: Math.round(numero(o.quantos, 1, 8, 'criar clones')), simples: o.simples === true };
+      case 'gritar': return { b: 'gritar', palavra: Math.round(numero(o.palavra, 0, TOTAL_PALAVRAS - 1, 'gritar')) };
+    }
+    throw new Recusa('comando: bloco desconhecido');
+  }
+  pilha(x: unknown, fundo: number): Comando[] {
+    if (x === undefined || x === null) return [];
+    if (!Array.isArray(x) || x.length > MAX_BLOCOS) throw new Recusa('pilha de comandos inválida');
+    if (fundo > MAX_FUNDO) throw new Recusa('comandos: encaixes demais');
+    return x.map((y) => {
+      const o = obj(y, 'comando');
+      this.blocos++;
+      if (o.b === 'paraCada') return { b: 'paraCada', filtro: o.filtro ? this.bool(o.filtro, fundo + 1) : null, corpo: this.pilha(o.corpo, fundo + 1) };
+      if (o.b === 'se') { const c: Comando = { b: 'se', cond: o.cond ? this.bool(o.cond, fundo + 1) : null, entao: this.pilha(o.entao, fundo + 1) }; if (o.senao !== undefined) c.senao = this.pilha(o.senao, fundo + 1); return c; }
+      return this.acao(o);
+    });
+  }
 }
 
 /** Confere um JSON vindo do Quadro (ou de um arquivo) e devolve uma tática limpa, ou o motivo da recusa. */
 export function conferirTatica(x: unknown): Resultado {
   try {
-    const o = obj(x, 'tática');
-    if (o.versao !== 1) throw new Recusa('tática: versão desconhecida');
+    let o = obj(x, 'tática');
+    if (o.versao === 1) o = doFormato1(o);
+    if (o.versao !== 2) throw new Recusa('tática: versão desconhecida');
     const n = obj(o.nome, 'nome');
-    if (!Array.isArray(o.regras)) throw new Recusa('tática: sem regras');
-    if (o.regras.length > MAX_BLOCOS) throw new Recusa(`tática: mais de ${MAX_BLOCOS} blocos`);
-    const lista = <T>(v: unknown, f: (y: unknown) => T, onde: string): T[] => { if (v === undefined) return []; if (!Array.isArray(v) || v.length > MAX_BLOCOS) throw new Recusa(`${onde}: lista inválida`); return v.map(f); };
-    const regras: Regra[] = o.regras.map((r) => { const q = obj(r, 'regra'); return { quando: conferirChapeu(q.quando), quem: lista(q.quem, conferirQuem, 'quem'), se: lista(q.se, (c) => conferirCond(c), 'se'), fazer: lista(q.fazer, conferirAcao, 'fazer') }; });
+    if (!Array.isArray(o.regras) || o.regras.length > MAX_BLOCOS) throw new Recusa('tática: lista de chapéus inválida');
+    const ler = new Leitor();
+    const regras: Regra[] = o.regras.map((r) => { const q = obj(r, 'chapéu'); ler.blocos++; return { quando: ler.chapeu(q.quando), corpo: ler.pilha(q.corpo, 1) }; });
     const orig = o.original && typeof o.original === 'object' ? o.original as Record<string, unknown> : {};
-    const t: Tatica = { versao: 1, nome: { pt: texto(n.pt, 'nome'), en: texto(n.en, 'nome') }, somar: o.somar !== false,
+    const t: Tatica = { versao: 2, nome: { pt: texto(n.pt, 'nome'), en: texto(n.en, 'nome') }, somar: o.somar !== false,
       original: { gerarClones: orig.gerarClones !== false, usarItens: orig.usarItens !== false }, regras };
-    const blocos = contarBlocos(t);
-    if (blocos > MAX_BLOCOS) throw new Recusa(`tática: ${blocos} blocos (máximo ${MAX_BLOCOS})`);
-    return { ok: true, tatica: t, blocos };
+    if (ler.blocos > MAX_BLOCOS) throw new Recusa(`tática: ${ler.blocos} blocos (máximo ${MAX_BLOCOS})`);
+    return { ok: true, tatica: t, blocos: ler.blocos };
   } catch (e) {
     if (e instanceof Recusa) return { ok: false, erro: e.message };
     return { ok: false, erro: 'tática inválida' };
   }
+}
+/** Quantos blocos uma tática já conferida tem. */
+export function contarBlocos(t: Tatica): number { const r = conferirTatica(t); return r.ok ? r.blocos : MAX_BLOCOS + 1; }
+
+// ---------------- formato 1 (rodada 1) → formato 2 ----------------
+type Bruto = Record<string, unknown>;
+const e2 = (lista: Bruto[]): Bruto | null => lista.reduce<Bruto | null>((acc, x) => (acc ? { b: 'e', a: acc, c: x } : x), null);
+const cmp = (op: string, valor: string, n: unknown): Bruto => ({ b: 'compara', op, a: { valor }, c: { n } });
+function quem1(q: Bruto): Bruto | null {
+  switch (q.b) {
+    case 'todos': return null;
+    case 'clones': return { b: 'nao', a: { b: 'eu', s: 'original' } };
+    case 'original': return { b: 'eu', s: 'original' };
+    case 'complexos': return { b: 'eu', s: 'complexo' };
+    case 'simples': return { b: 'eu', s: 'simples' };
+    case 'armadilhas': return { b: 'eu', s: 'armadilha' };
+    case 'livre': case 'machucado': case 'noAr': case 'atrasDoUrso': case 'frenteDoUrso': return { b: 'eu', s: q.b };
+    case 'grudados': return { b: 'eu', s: 'grudado' };
+    case 'grupo': return { b: 'grupo', grupo: q.grupo };
+    case 'pertoDoUrso': return cmp('<', 'minhaDistancia', q.m);
+    case 'longeDoUrso': return cmp('>', 'minhaDistancia', q.m);
+    case 'pertoDoOriginal': return { b: 'e', a: { b: 'nao', a: { b: 'eu', s: 'original' } }, c: cmp('<', 'distanciaOriginal', q.m) };
+    case 'maisPertoDoUrso': return { b: 'maisPerto', n: q.n };
+    case 'acabouDeNascer': return cmp('<', 'minhaIdade', q.s);
+    case 'nascidoHa': return cmp('>', 'minhaIdade', q.s);
+  }
+  return q; // desconhecido: a conferência do formato 2 recusa
+}
+function cond1(c: Bruto): Bruto {
+  switch (c.b) {
+    case 'ursoSentado': case 'ursoTonto': case 'ursoNoAr': case 'ursoAgarrando': case 'ursoFurioso': case 'ursoHumano': case 'originalNoAr': return { b: 'sensor', s: c.b };
+    case 'ursoFraco': return cmp('<', 'ursoRes', c.res);
+    case 'ursoNaBorda': return cmp('<', 'ursoBorda', c.m);
+    case 'equilibrio': return cmp('>', 'ursoEquilibrio', c.maisDe);
+    case 'agua': return cmp('>', 'agua', c.maisDe);
+    case 'clonesVivos': return cmp('>', 'clonesVivos', c.maisDe);
+    case 'tempo': return cmp('>', 'tempo', c.maisDe);
+    case 'originalMachucado': return cmp('<', 'originalRes', c.res);
+    case 'temFormacao': return { b: 'formacao', tipo: c.tipo };
+    case 'chance': return { b: 'chance', pct: c.pct };
+    case 'nao': return { b: 'nao', a: cond1(obj(c.c, 'não')) };
+    case 'ou': return { b: 'ou', a: cond1(obj(c.a, 'ou')), c: cond1(obj(c.c, 'ou')) };
+  }
+  return c;
+}
+function doFormato1(o: Bruto): Bruto {
+  if (!Array.isArray(o.regras)) throw new Recusa('tática: sem regras');
+  const regras = o.regras.map((r) => {
+    const q = obj(r, 'regra'), lista = (v: unknown) => (Array.isArray(v) ? v.map((x) => obj(x, 'bloco')) : []);
+    const filtro = e2(lista(q.quem).map(quem1).filter((x): x is Bruto => !!x));
+    const cond = e2(lista(q.se).map(cond1));
+    const fazer = lista(q.fazer);
+    const dentro = cond ? [{ b: 'se', cond, entao: fazer }] : fazer;
+    return { quando: q.quando, corpo: [{ b: 'paraCada', filtro, corpo: dentro }] };
+  });
+  return { ...o, versao: 2, regras };
 }
 
 // ---------------- o técnico (interpretador) ----------------
@@ -202,6 +269,7 @@ interface Rastro {
 const dist = (a: V3, b: V3) => Math.hypot(a.x - b.x, a.z - b.z);
 /** Frente do urso pelo giro (0 = olhando para −z), no chão. */
 const frenteDoGiro = (g: number) => ({ x: -Math.sin(g), z: -Math.cos(g) });
+interface Contexto { porDistancia: number[] }
 
 export class Tecnico {
   tatica: Tatica | null = null;
@@ -223,7 +291,7 @@ export class Tecnico {
   constructor(private aleatorio: () => number = Math.random) {}
 
   /** Troca a tática em campo (teclas 1 a 4). null = sem tática: todos na IA mínima (as opções do teste valem).
-   *  Com tática, complexo sem regra que sirva pensa sozinho (IA esperta). */
+   *  Com tática, complexo sem nenhuma ação pensa sozinho (IA esperta). */
   trocar(t: Tatica | null): void { this.tatica = t; this.comecouEm = null; for (const r of this.rastros.values()) { r.tipo = ''; r.ordem = null; r.pendente = null; } }
   /** O jogador apertou a tecla de um sinal (U, I, O, P). */
   sinal(i: number): void { if (i >= 0 && i <= 3) { this.sinaisNovos.push(i); this.aoSinal?.(i); } }
@@ -233,6 +301,15 @@ export class Tecnico {
   contarGrupos(): Record<Grupo, number> { const c = { alpha: 0, beta: 0, gamma: 0, sigma: 0 }; for (const r of this.rastros.values()) c[r.grupo]++; return c; }
   /** Muda o grupo de um Piranbenja (pintar na mini-grade). */
   pintar(numero: number, g: Grupo): void { const c = this.codigoDoNumero.get(numero); const r = c === undefined ? null : this.rastros.get(c); if (r) r.grupo = g; }
+  /** "+" de um grupo na mini-grade: o clone mais perto do centro do grupo, vindo de outro grupo, passa para ele.
+   *  "−": o clone do grupo mais longe do centro dele volta para o alpha (ou para o beta, se o grupo é o alpha). */
+  mudarQuantidade(g: Grupo, sinal: 1 | -1, posicoes: { numero: number; pos: V3 }[]): boolean {
+    const doGrupo = posicoes.filter((p) => this.grupoDe(p.numero) === g), outros = posicoes.filter((p) => this.grupoDe(p.numero) !== g);
+    const ref = doGrupo.length ? { x: doGrupo.reduce((s, p) => s + p.pos.x, 0) / doGrupo.length, z: doGrupo.reduce((s, p) => s + p.pos.z, 0) / doGrupo.length } : { x: 0, z: 0 };
+    const d = (p: { pos: V3 }) => Math.hypot(p.pos.x - ref.x, p.pos.z - ref.z);
+    if (sinal > 0) { const c = outros.sort((a, b) => d(a) - d(b))[0]; if (!c) return false; this.pintar(c.numero, g); return true; }
+    const c = doGrupo.sort((a, b) => d(b) - d(a))[0]; if (!c) return false; this.pintar(c.numero, g === 'alpha' ? 'beta' : 'alpha'); return true;
+  }
 
   private pensar(v: VisaoTatica): DecisaoTatica {
     this.tempo = v.tempo;
@@ -243,20 +320,22 @@ export class Tecnico {
     if (t && this.comecouEm === null) this.comecouEm = v.tempo;
     const decisao: DecisaoTatica = { ordens: {} };
     let formar: Extract<Acao, { b: 'formar' }> | null = null, criar: Extract<Acao, { b: 'criarClones' }> | null = null, gritar: number | null = null;
-    const porDistancia = [...agentes].sort((a, b) => a.dUrso - b.dUrso).map((a) => a.codigo);
+    const ctx: Contexto = { porDistancia: [...agentes].sort((a, b) => a.dUrso - b.dUrso).map((a) => a.codigo) };
     const turno = this.escolherTurno(agentes, v);
-    const ativas = (t?.regras ?? []).map((r, i) => ({ r, i, vale: this.chapeuVale(r.quando, v) && r.se.every((c) => temChance(c) || this.cond(c, v, null, i)) }));
+    const ativas = (t?.regras ?? []).filter((r) => this.chapeuVale(r.quando, v));
     for (const ag of agentes) {
-      const servem = ativas.filter((x) => x.vale && x.r.quem.every((q) => this.quem(q, ag, v, porDistancia)) && x.r.se.every((c) => !temChance(c) || this.cond(c, v, ag, x.i)));
-      const usadas = t?.somar ? servem : servem.slice(0, 1);
+      const listas: Acao[][] = [];
+      for (const r of ativas) { const acoes: Acao[] = []; this.rodar(r.corpo, ag, v, ctx, acoes); if (acoes.length) listas.push(acoes); }
+      const usadas = t?.somar ? listas : listas.slice(0, 1);
       let exclusiva: { tipo: string; ordem: OrdemClone } | null = null;
       let mx = 0, mz = 0, moveu = false;
-      for (const { r } of usadas) {
-        for (const a of r.fazer) {
-          // ações do time (valem uma vez, não por clone)
+      for (const acoes of usadas) {
+        for (const a of acoes) {
+          // ações do time (valem uma vez, não por clone) e a troca de grupo
           if (a.b === 'formar') { formar ??= a; continue; }
           if (a.b === 'criarClones') { criar ??= a; continue; }
           if (a.b === 'gritar') { gritar ??= a.palavra; continue; }
+          if (a.b === 'entrarGrupo') { ag.r.grupo = a.grupo; continue; }
           const e = this.exclusiva(a, ag, v, turno);
           if (e) { if (!exclusiva) exclusiva = e; continue; }
           const f = this.forca(a, ag, v, agentes); if (f) { mx += f.x; mz += f.z; moveu = true; }
@@ -272,7 +351,7 @@ export class Tecnico {
         this.decidir(ag, 'mover', { ir: { x: ag.pos.x + (mx / n) * passo, y: 0, z: ag.pos.z + (mz / n) * passo } });
         continue;
       }
-      // sem regra: o complexo (e o original no automático) pensa sozinho; o simples fica na IA mínima
+      // sem nenhuma ação: o complexo (e o original no automático) pensa sozinho; o simples fica na IA mínima
       if (t && !usadas.length && !ag.simples && !ag.armadilha) { const e = this.esperto(ag, v, turno); this.decidir(ag, e.tipo, e.ordem); continue; }
       this.decidir(ag, '', null);
     }
@@ -290,7 +369,77 @@ export class Tecnico {
     return decisao;
   }
 
-  /** Cada Piranbenja pelo código fixo (D-327); quem nasceu agora entra no grupo escolhido. */
+  /** Lê uma pilha de comandos para um clone e junta as ações que ele alcançou, em ordem. */
+  private rodar(pilha: Comando[], ag: Agente, v: VisaoTatica, ctx: Contexto, saida: Acao[]): void {
+    for (const c of pilha) {
+      if (c.b === 'paraCada') { if (!c.filtro || this.bool(c.filtro, ag, v, ctx)) this.rodar(c.corpo, ag, v, ctx, saida); continue; }
+      if (c.b === 'se') { if (c.cond && this.bool(c.cond, ag, v, ctx)) this.rodar(c.entao, ag, v, ctx, saida); else if (c.senao) this.rodar(c.senao, ag, v, ctx, saida); continue; }
+      saida.push(c);
+    }
+  }
+
+  /** Repórteres redondos. */
+  private valor(x: Num, ag: Agente, v: VisaoTatica): number {
+    if ('n' in x) return x.n;
+    const u = v.urso;
+    switch (x.valor) {
+      case 'ursoRes': return u.res;
+      case 'ursoEquilibrio': return u.equilibrio;
+      case 'ursoBorda': return RINGUE.raio - Math.hypot(u.cabeca.x, u.cabeca.z);
+      case 'agua': return v.agua;
+      case 'clonesVivos': return v.clones.length;
+      case 'tempo': return v.tempo;
+      case 'minhaDistancia': return ag.dUrso;
+      case 'minhaRes': return Math.round(ag.resFrac * 100);
+      case 'minhaIdade': return ag.idade;
+      case 'distanciaOriginal': return ag.original || !v.original ? 0 : dist(ag.pos, v.original.pos);
+      case 'originalRes': return v.original?.res ?? 0;
+    }
+  }
+
+  /** Blocos hexagonais. "com chance de" sorteia por clone e fica igual por 2 s (não pisca a cada 0,25 s). */
+  private bool(c: Bool, ag: Agente, v: VisaoTatica, ctx: Contexto): boolean {
+    const u = v.urso;
+    switch (c.b) {
+      case 'e': return this.bool(c.a, ag, v, ctx) && this.bool(c.c, ag, v, ctx);
+      case 'ou': return this.bool(c.a, ag, v, ctx) || this.bool(c.c, ag, v, ctx);
+      case 'nao': return !this.bool(c.a, ag, v, ctx);
+      case 'compara': {
+        const a = this.valor(c.a, ag, v), b = this.valor(c.c, ag, v);
+        return c.op === '<' ? a < b : c.op === '>' ? a > b : Math.round(a) === Math.round(b);
+      }
+      case 'sensor':
+        switch (c.s) {
+          case 'ursoSentado': return u.sentado;
+          case 'ursoTonto': return u.tonto;
+          case 'ursoNoAr': return u.noAr;
+          case 'ursoAgarrando': return u.agarrando;
+          case 'ursoFurioso': case 'ursoHumano': return false; // D-307: o urso ainda não tem esses modos
+          case 'originalNoAr': return !!v.original?.noAr;
+        }
+        return false;
+      case 'eu':
+        switch (c.s) {
+          case 'complexo': return !ag.original && !ag.simples && !ag.armadilha;
+          case 'simples': return !ag.original && ag.simples && !ag.armadilha;
+          case 'armadilha': return ag.armadilha;
+          case 'original': return ag.original;
+          case 'livre': return ag.livre;
+          case 'machucado': return ag.resFrac < 0.5;
+          case 'grudado': return ag.grudado;
+          case 'noAr': return ag.noAr;
+          case 'atrasDoUrso': return ag.frente < -0.3;
+          case 'frenteDoUrso': return ag.frente > 0.5;
+        }
+        return false;
+      case 'grupo': return ag.r.grupo === c.grupo;
+      case 'maisPerto': return ctx.porDistancia.indexOf(ag.codigo) < c.n;
+      case 'formacao': return v.formacoes.some((f) => f.tipo === c.tipo);
+      case 'chance': return sorteioFixo(ag.codigo, 100 + (c.id ?? 0), Math.floor(v.tempo / 2)) * 100 < c.pct;
+    }
+  }
+
+
   private reconhecer(v: VisaoTatica): Agente[] {
     const lista: Agente[] = [], vivos = new Set<number>(), u = v.urso, f = frenteDoGiro(u.giro);
     this.codigoDoNumero.clear();
@@ -365,54 +514,6 @@ export class Tecnico {
     return this.comecouEm !== null && v.tempo - this.comecouEm <= (c.dura ?? DURA_COMECO);
   }
 
-  /** Condições. "chance" depende do clone (sorteio estável por 2 s) e só é avaliada com o clone em mãos. */
-  private cond(c: Cond, v: VisaoTatica, ag: Agente | null, regra: number): boolean {
-    const u = v.urso;
-    switch (c.b) {
-      case 'ursoSentado': return u.sentado;
-      case 'ursoTonto': return u.tonto;
-      case 'ursoNoAr': return u.noAr;
-      case 'ursoAgarrando': return u.agarrando;
-      case 'ursoFurioso': case 'ursoHumano': return false;
-      case 'ursoFraco': return u.res < c.res;
-      case 'ursoNaBorda': return Math.hypot(u.cabeca.x, u.cabeca.z) > RINGUE.raio - c.m;
-      case 'equilibrio': return u.equilibrio > c.maisDe;
-      case 'originalMachucado': return !!v.original && v.original.res < c.res;
-      case 'originalNoAr': return !!v.original?.noAr;
-      case 'agua': return v.agua > c.maisDe;
-      case 'clonesVivos': return v.clones.length > c.maisDe;
-      case 'tempo': return v.tempo > c.maisDe;
-      case 'temFormacao': return v.formacoes.some((f) => f.tipo === c.tipo);
-      case 'chance': return ag ? sorteioFixo(ag.codigo, regra, Math.floor(v.tempo / 2)) * 100 < c.pct : true;
-      case 'nao': return !this.cond(c.c, v, ag, regra);
-      case 'ou': return this.cond(c.a, v, ag, regra) || this.cond(c.c, v, ag, regra);
-    }
-  }
-
-  private quem(q: Quem, ag: Agente, v: VisaoTatica, porDistancia: number[]): boolean {
-    switch (q.b) {
-      case 'todos': return true;
-      case 'clones': return !ag.original;
-      case 'original': return ag.original;
-      case 'complexos': return !ag.original && !ag.simples && !ag.armadilha;
-      case 'simples': return !ag.original && ag.simples && !ag.armadilha;
-      case 'armadilhas': return ag.armadilha;
-      case 'grupo': return ag.r.grupo === q.grupo;
-      case 'pertoDoUrso': return ag.dUrso < q.m;
-      case 'longeDoUrso': return ag.dUrso >= q.m;
-      case 'pertoDoOriginal': return !!v.original && !ag.original && dist(ag.pos, v.original.pos) < q.m;
-      case 'maisPertoDoUrso': return porDistancia.indexOf(ag.codigo) < q.n;
-      case 'acabouDeNascer': return ag.idade < q.s;
-      case 'nascidoHa': return ag.idade >= q.s;
-      case 'machucado': return ag.resFrac < 0.5;
-      case 'grudados': return ag.grudado;
-      case 'noAr': return ag.noAr;
-      case 'atrasDoUrso': return ag.frente < -0.3;
-      case 'frenteDoUrso': return ag.frente > 0.5;
-      case 'livre': return ag.livre;
-    }
-  }
-
   private exclusiva(a: Acao, ag: Agente, v: VisaoTatica, turno: Set<number>): { tipo: string; ordem: OrdemClone } | null {
     if (a.b === 'atacar') { const o: OrdemClone = { atacar: a.ataque }; if (a.mirar) o.mirar = a.mirar; return { tipo: `atacar:${a.ataque}:${a.mirar ?? ''}${a.depois ? ':recuar' : ''}`, ordem: o }; }
     if (a.b === 'parar') return { tipo: 'parar', ordem: { parar: true } };
@@ -472,8 +573,6 @@ export class Tecnico {
     if (this.tempo >= r.valeEm) { r.tipo = tipo; r.ordem = r.ignora ? null : ordem; r.pendente = null; }
   }
 }
-
-const temChance = (c: Cond): boolean => c.b === 'chance' || (c.b === 'nao' && temChance(c.c)) || (c.b === 'ou' && (temChance(c.a) || temChance(c.c)));
 /** Sorteio repetível (0..1) por clone, regra e janela de tempo: "com chance de 30%" não pisca a cada 0,25 s. */
 function sorteioFixo(a: number, b: number, c: number): number {
   let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0;
@@ -481,55 +580,75 @@ function sorteioFixo(a: number, b: number, c: number): number {
   return (h >>> 0) / 4294967296;
 }
 
-// ---------------- táticas prontas (iniciantes, D-322) ----------------
-// Os quatro sinais valem em todas: U recua rolando, I ataca junto, O monta muralha perto do urso, P manda a fila.
-const SINAIS: Regra[] = [
-  { quando: { b: 'sinal', sinal: 0 }, quem: [{ b: 'clones' }, { b: 'pertoDoUrso', m: 1.5 }], se: [], fazer: [{ b: 'rolar' }] },
-  { quando: { b: 'sinal', sinal: 0 }, quem: [{ b: 'clones' }], se: [], fazer: [{ b: 'recuar' }, { b: 'espalhar' }] },
-  { quando: { b: 'sinal', sinal: 1 }, quem: [{ b: 'clones' }, { b: 'livre' }], se: [], fazer: [{ b: 'atacar', ataque: 'soco', mirar: 'pernas' }] },
-  { quando: { b: 'sinal', sinal: 2 }, quem: [{ b: 'todos' }], se: [], fazer: [{ b: 'formar', tipo: 'muralha', perto: 'urso' }] },
-  { quando: { b: 'sinal', sinal: 3 }, quem: [{ b: 'todos' }], se: [], fazer: [{ b: 'formar', tipo: 'fila' }] },
+
+/** Palavras-código dos sinais (aprovadas em C26); o nome pertence à tecla, não à tática. */
+export const PALAVRAS_CODIGO: { pt: string; en: string }[] = [
+  { pt: 'Tubarão Relâmpago', en: 'Lightning Shark' }, { pt: 'Abacaxi Supremo', en: 'Supreme Pineapple' },
+  { pt: 'Pastel Dimensional', en: 'Dimensional Pastry' }, { pt: 'Torpedo de Sushi', en: 'Sushi Torpedo' },
+  { pt: 'Olhar do Baiacu', en: 'Pufferfish Glare' }, { pt: 'Despertar das Barbatanas', en: 'Fin Awakening' },
+  { pt: 'Tempestade de Escamas', en: 'Scale Storm' }, { pt: 'Ninja de Aquário', en: 'Aquarium Ninja' },
+  { pt: 'Kaiju de Bolso', en: 'Pocket Kaiju' }, { pt: 'Rugido do Mar Profundo', en: 'Deep Sea Roar' },
+  { pt: 'Punho do Bolinho de Arroz', en: 'Rice Ball Fist' }, { pt: 'Lâmina da Maré Final', en: 'Final Tide Blade' },
 ];
+// ---------------- táticas prontas (iniciantes, D-322, D-333), no formato 2 ----------------
+// Montadas com os mesmos blocos do Quadro: o Quadro carrega estas pilhas nas abas 1 a 4.
 const sempre: Chapeu = { b: 'sempre' };
+const chapeu = (quando: Chapeu, ...corpo: Comando[]): Regra => ({ quando, corpo });
+const cada = (filtro: Bool | null, ...corpo: Comando[]): Comando => ({ b: 'paraCada', filtro, corpo });
+const se = (cond: Bool, entao: Comando[], senao?: Comando[]): Comando => (senao ? { b: 'se', cond, entao, senao } : { b: 'se', cond, entao });
+const eu = (s: Eu): Bool => ({ b: 'eu', s });
+const sensor = (s: Sensor): Bool => ({ b: 'sensor', s });
+const e = (a: Bool, c: Bool): Bool => ({ b: 'e', a, c });
+const ou = (a: Bool, c: Bool): Bool => ({ b: 'ou', a, c });
+const nao = (a: Bool): Bool => ({ b: 'nao', a });
+const menor = (valor: Valor, n: number): Bool => ({ b: 'compara', op: '<', a: { valor }, c: { n } });
+const maior = (valor: Valor, n: number): Bool => ({ b: 'compara', op: '>', a: { valor }, c: { n } });
+const atacar = (ataque: AtaquePB, mirar?: Mira, depois?: 'recuar'): Acao => { const a: Acao = { b: 'atacar', ataque }; if (mirar) a.mirar = mirar; if (depois) a.depois = depois; return a; };
+const clone = nao(eu('original'));
 const ORIGINAL = { gerarClones: true, usarItens: true };
-/** Comum a todas: machucado foge rolando; simples batem nas pernas; armadilhas ficam na IA mínima. */
-const FUGIR: Regra = { quando: sempre, quem: [{ b: 'clones' }, { b: 'machucado' }, { b: 'pertoDoUrso', m: 1.6 }], se: [{ b: 'nao', c: { b: 'ursoSentado' } }], fazer: [{ b: 'rolar' }] };
+/** Os quatro sinais valem em todas: U rola (perto do urso) ou recua, I ataca as pernas, O muralha perto do urso, P fila. */
+const SINAIS: Regra[] = [
+  chapeu({ b: 'sinal', sinal: 0 }, cada(clone, se(menor('minhaDistancia', 1.5), [{ b: 'rolar' }], [{ b: 'recuar' }, { b: 'espalhar' }]))),
+  chapeu({ b: 'sinal', sinal: 1 }, cada(e(clone, eu('livre')), atacar('soco', 'pernas'))),
+  chapeu({ b: 'sinal', sinal: 2 }, { b: 'formar', tipo: 'muralha', perto: 'urso' }),
+  chapeu({ b: 'sinal', sinal: 3 }, { b: 'formar', tipo: 'fila' }),
+];
+/** Comum: machucado e perto do urso foge rolando (menos com o urso sentado). */
+const FUGIR = chapeu(sempre, cada(e(clone, eu('machucado')), se(e(menor('minhaDistancia', 1.6), nao(sensor('ursoSentado'))), [{ b: 'rolar' }])));
+const SIMPLES_E_ORIGINAL = (raio: number, sentido: 1 | -1, depois?: 'recuar'): Comando[] => [
+  cada(eu('simples'), atacar('tapa', 'pernas', depois)),
+  cada(eu('original'), { b: 'rodear', m: raio, sentido }),
+];
+const pronta = (pt: string, en: string, regras: Regra[]): Tatica => ({ versao: 2, nome: { pt, en }, somar: true, original: ORIGINAL, regras });
 export const TATICAS_PRONTAS: Tatica[] = [
-  { versao: 1, nome: { pt: 'Enxame', en: 'Swarm' }, somar: true, original: ORIGINAL, regras: [...SINAIS, FUGIR,
+  pronta('Enxame', 'Swarm', [...SINAIS, FUGIR,
     // os complexos pensam sozinhos (IA esperta: turnos pelas costas, aproveitam as aberturas)
-    { quando: sempre, quem: [{ b: 'complexos' }], se: [], fazer: [{ b: 'esperto' }] },
-    { quando: sempre, quem: [{ b: 'simples' }], se: [], fazer: [{ b: 'atacar', ataque: 'tapa', mirar: 'pernas' }] },
-    { quando: sempre, quem: [{ b: 'original' }], se: [], fazer: [{ b: 'rodear', m: 2.8, sentido: 1 }] },
-  ] },
-  { versao: 1, nome: { pt: 'Morde e foge', en: 'Bite and Run' }, somar: true, original: ORIGINAL, regras: [...SINAIS, FUGIR,
-    { quando: sempre, quem: [{ b: 'complexos' }, { b: 'maisPertoDoUrso', n: 5 }], se: [], fazer: [{ b: 'atacar', ataque: 'morder', mirar: 'pernas', depois: 'recuar' }] },
-    { quando: sempre, quem: [{ b: 'complexos' }], se: [], fazer: [{ b: 'rodear', m: 2.5, sentido: -1 }, { b: 'espalhar' }] },
-    { quando: sempre, quem: [{ b: 'simples' }], se: [], fazer: [{ b: 'atacar', ataque: 'tapa', mirar: 'pernas', depois: 'recuar' }] },
-    { quando: sempre, quem: [{ b: 'original' }], se: [], fazer: [{ b: 'rodear', m: 3, sentido: -1 }] },
-  ] },
-  { versao: 1, nome: { pt: 'Derruba e bate', en: 'Trip and Pound' }, somar: true, original: ORIGINAL, regras: [...SINAIS,
-    { quando: sempre, quem: [{ b: 'complexos' }], se: [{ b: 'ursoSentado' }], fazer: [{ b: 'atacar', ataque: 'chute', mirar: 'barriga' }] },
+    chapeu(sempre, cada(eu('complexo'), { b: 'esperto' }), ...SIMPLES_E_ORIGINAL(2.8, 1)),
+  ]),
+  pronta('Morde e foge', 'Bite and Run', [...SINAIS, FUGIR,
+    chapeu(sempre, cada(eu('complexo'), se({ b: 'maisPerto', n: 5 }, [atacar('morder', 'pernas', 'recuar')], [{ b: 'rodear', m: 2.5, sentido: -1 }, { b: 'espalhar' }])),
+      ...SIMPLES_E_ORIGINAL(3, -1, 'recuar')),
+  ]),
+  pronta('Derruba e bate', 'Trip and Pound', [...SINAIS,
+    chapeu(sempre, se(sensor('ursoSentado'), [cada(eu('complexo'), atacar('chute', 'barriga'))])),
     FUGIR,
-    { quando: sempre, quem: [{ b: 'todos' }], se: [{ b: 'nao', c: { b: 'temFormacao', tipo: 'corrente' } }, { b: 'nao', c: { b: 'ursoSentado' } }], fazer: [{ b: 'formar', tipo: 'corrente', perto: 'urso' }] },
-    { quando: sempre, quem: [{ b: 'complexos' }, { b: 'maisPertoDoUrso', n: 3 }], se: [], fazer: [{ b: 'atacar', ataque: 'soco', mirar: 'pernas' }] },
-    { quando: sempre, quem: [{ b: 'complexos' }], se: [], fazer: [{ b: 'rodear', m: 2, sentido: 1 }, { b: 'espalhar' }] },
-    { quando: sempre, quem: [{ b: 'simples' }], se: [], fazer: [{ b: 'atacar', ataque: 'tapa', mirar: 'pernas' }] },
-    { quando: sempre, quem: [{ b: 'original' }], se: [], fazer: [{ b: 'rodear', m: 3, sentido: 1 }] },
-  ] },
-  { versao: 1, nome: { pt: 'Malabarismo', en: 'Juggling' }, somar: true, original: ORIGINAL, regras: [...SINAIS,
-    { quando: sempre, quem: [{ b: 'clones' }, { b: 'livre' }], se: [{ b: 'ursoNoAr' }], fazer: [{ b: 'atacar', ataque: 'cabecada' }] },
+    chapeu(sempre,
+      se(e(nao({ b: 'formacao', tipo: 'corrente' }), nao(sensor('ursoSentado'))), [{ b: 'formar', tipo: 'corrente', perto: 'urso' }]),
+      cada(eu('complexo'), se({ b: 'maisPerto', n: 3 }, [atacar('soco', 'pernas')], [{ b: 'rodear', m: 2, sentido: 1 }, { b: 'espalhar' }])),
+      ...SIMPLES_E_ORIGINAL(3, 1)),
+  ]),
+  pronta('Malabarismo', 'Juggling', [...SINAIS,
+    chapeu(sempre, se(sensor('ursoNoAr'), [cada(e(clone, eu('livre')), atacar('cabecada'))])),
     FUGIR,
-    { quando: sempre, quem: [{ b: 'todos' }], se: [{ b: 'nao', c: { b: 'temFormacao', tipo: 'catapulta' } }], fazer: [{ b: 'formar', tipo: 'catapulta' }] },
-    { quando: sempre, quem: [{ b: 'complexos' }, { b: 'longeDoUrso', m: 2 }], se: [{ b: 'temFormacao', tipo: 'catapulta' }], fazer: [{ b: 'catapulta' }] },
-    { quando: sempre, quem: [{ b: 'complexos' }], se: [], fazer: [{ b: 'esperto' }] },
-    { quando: sempre, quem: [{ b: 'simples' }], se: [], fazer: [{ b: 'atacar', ataque: 'tapa', mirar: 'pernas' }] },
-    { quando: sempre, quem: [{ b: 'original' }], se: [], fazer: [{ b: 'rodear', m: 3, sentido: 1 }] },
-  ] },
-  { versao: 1, nome: { pt: 'Chute na borda', en: 'Edge Kick' }, somar: true, original: ORIGINAL, regras: [...SINAIS, FUGIR,
-    { quando: sempre, quem: [{ b: 'complexos' }, { b: 'frenteDoUrso' }], se: [{ b: 'ou', a: { b: 'ursoNaBorda', m: 2.5 }, c: { b: 'ursoFraco', res: 30 } }], fazer: [{ b: 'distrair', tipo: 'careta' }] },
-    { quando: sempre, quem: [{ b: 'complexos' }], se: [{ b: 'ou', a: { b: 'ursoNaBorda', m: 2.5 }, c: { b: 'ursoFraco', res: 30 } }], fazer: [{ b: 'atacar', ataque: 'chute', mirar: 'barriga' }] },
-    { quando: sempre, quem: [{ b: 'complexos' }], se: [], fazer: [{ b: 'esperto' }] },
-    { quando: sempre, quem: [{ b: 'simples' }], se: [], fazer: [{ b: 'atacar', ataque: 'tapa', mirar: 'pernas' }] },
-    { quando: sempre, quem: [{ b: 'original' }], se: [], fazer: [{ b: 'rodear', m: 3, sentido: 1 }] },
-  ] },
+    chapeu(sempre,
+      se(nao({ b: 'formacao', tipo: 'catapulta' }), [{ b: 'formar', tipo: 'catapulta' }], [cada(e(eu('complexo'), maior('minhaDistancia', 2)), { b: 'catapulta' })]),
+      cada(eu('complexo'), { b: 'esperto' }),
+      ...SIMPLES_E_ORIGINAL(3, 1)),
+  ]),
+  pronta('Chute na borda', 'Edge Kick', [...SINAIS, FUGIR,
+    chapeu(sempre,
+      se(ou(menor('ursoBorda', 2.5), menor('ursoRes', 30)), [cada(eu('complexo'), se(eu('frenteDoUrso'), [{ b: 'distrair', tipo: 'careta' }], [atacar('chute', 'barriga')]))]),
+      cada(eu('complexo'), { b: 'esperto' }),
+      ...SIMPLES_E_ORIGINAL(3, 1)),
+  ]),
 ];
