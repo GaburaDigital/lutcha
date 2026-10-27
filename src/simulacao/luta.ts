@@ -22,11 +22,11 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
-  AGUA, ALCANCE_FORMAR, MAX_CLONES, ATAQUES_IMPACTO, ATORDOA_RASPAO, CATAPULTA, EQUILIBRIO, ESCALAR, FORMACOES, GOLPES, JANELA_COMBO, MARTELADA_PRESO,
+  AGUA, ALCANCE_FORMAR, DISTRACOES, MAX_CLONES, MIRAS, ROLAR, TOTAL_PALAVRAS, ATAQUES_IMPACTO, ATORDOA_RASPAO, CATAPULTA, EQUILIBRIO, ESCALAR, FORMACOES, GOLPES, JANELA_COMBO, MARTELADA_PRESO,
   MULT_QUALIDADE, PARTE_VIZINHOS, PESO, PIRANBENJA, RINGUE, TIPOS_FORMACAO, URSO, URSO_APANHANDO,
   classificarGolpe, empurraoNoUrso, fatorCombo, gerarBlocos, lancamento, maoMeioFechada, modsDaZona, qualidadeDoGolpe, saidaCatapulta,
   velocidadeDeDecolagem, zonaDoContato,
-  type AtaqueImpacto, type NomeGolpe, type Qualidade, type TipoFormacao, type TipoGolpe, type V3, type Zona,
+  type AtaqueImpacto, type Distracao, type Mira, type NomeGolpe, type Qualidade, type TipoFormacao, type TipoGolpe, type V3, type Zona,
 } from './regras';
 import {
   CORPO_URSO, baseDoSegmento, eixosDoGiro, esqueletoUrso, pataNaSuperficie, pertoEntreSegmentos, pertoNoSegmento, zonaDoSegmento,
@@ -65,20 +65,36 @@ export interface ControleOriginal {
 // A tática roda só no PC (nunca vai para o Quest, D-221/D-304). Ela recebe a visão abaixo a cada 0,25 s e devolve
 // ordens por clone; a Luta continua cuidando da física, das proteções (não sair do ringue) e do sigilo.
 // Sem ordem para um clone, vale a IA mínima de hoje (pensarClone).
+// C27 (D-327 a D-330): cada Piranbenja tem um código fixo (só no PC, nunca na rede), mais dados de cada clone e do urso,
+// e a tática pode criar clones, montar formação perto do urso ou só com clones escolhidos, mirar uma parte do urso,
+// rolar, fazer distrações e dar o grito do sinal (só o número da palavra vai para o Quest).
 export interface VisaoTatica {
   tempo: number; agua: number;
-  urso: { cabeca: V3; res: number; equilibrio: number; sentado: boolean; tonto: boolean; noAr: boolean };
-  original: { numero: number; pos: V3 } | null;
-  clones: { numero: number; pos: V3; estado: EstadoIA; simples: boolean; armadilha: boolean; emFormacao: boolean; distanciaAoUrso: number }[];
+  /** giro: para onde o urso olha (0 = −z); agarrando: segura alguém em alguma pata. */
+  urso: { cabeca: V3; res: number; equilibrio: number; sentado: boolean; tonto: boolean; noAr: boolean; giro: number; agarrando: boolean };
+  original: { numero: number; codigo: number; pos: V3; res: number; noAr: boolean } | null;
+  /** codigo: fixo do nascimento até derreter (os números da rede são sorteados de novo). idade: segundos desde que nasceu. */
+  clones: { numero: number; codigo: number; pos: V3; estado: EstadoIA; simples: boolean; armadilha: boolean; emFormacao: boolean; distanciaAoUrso: number;
+    res: number; idade: number; grudado: boolean; noAr: boolean; distracao: Distracao | null }[];
   formacoes: FotoFormacao[];
 }
-/** Ordem para um clone: ir até um ponto, atacar o urso (chega perto e arma), recuar, parar ou ir para a catapulta. */
-export interface OrdemClone { ir?: V3; atacar?: AtaquePB; recuar?: boolean; parar?: boolean; catapulta?: boolean }
-export interface DecisaoTatica { ordens?: Record<number, OrdemClone>; formar?: TipoFormacao | null }
+/** Ordem para um clone: ir até um ponto, atacar o urso (chega perto e arma; "mirar" escolhe a parte), recuar, parar,
+ *  ir para a catapulta, rolar (para um lado, ou para longe do urso) ou fazer uma distração. */
+export interface OrdemClone { ir?: V3; atacar?: AtaquePB; mirar?: Mira; recuar?: boolean; parar?: boolean; catapulta?: boolean; rolar?: { x: number; z: number } | true; distrair?: Distracao }
+/** Formação pedida pela tática: só o tipo (como a tecla F), ou perto do urso, ou só com os clones escolhidos (códigos). */
+export interface PedidoFormacao { tipo: TipoFormacao; perto?: 'original' | 'urso'; com?: number[] }
+export interface DecisaoTatica {
+  ordens?: Record<number, OrdemClone>;
+  formar?: TipoFormacao | PedidoFormacao | null;
+  /** Criar clones (respeitar "pode gerar clones", D-310, é da tática). */
+  criarClones?: { quantos: number; simples: boolean } | null;
+  /** Grito do sinal: número da palavra-código (0 a 11). Vai para o Quest como evento "fala". */
+  falar?: number | null;
+}
 export type Cerebro = (v: VisaoTatica) => DecisaoTatica;
 
 /** O que o clone está fazendo (aparece nas ajudas visuais do teste). Cabe em 4 bits na rede (até 16). */
-export const ESTADOS_IA = ['andando', 'parado', 'aproximando', 'rodeando', 'armando', 'atacando', 'recuando', 'atordoado', 'formacao', 'caido', 'projetil', 'escalando'] as const;
+export const ESTADOS_IA = ['andando', 'parado', 'aproximando', 'rodeando', 'armando', 'atacando', 'recuando', 'atordoado', 'formacao', 'caido', 'projetil', 'escalando', 'rolando'] as const;
 export type EstadoIA = typeof ESTADOS_IA[number];
 export type Comportamento = 'parados' | 'aleatorio' | 'cautelosos' | 'ofensivos' | 'seguir';
 export type Formacao = 'solto' | TipoFormacao;
@@ -93,6 +109,8 @@ export interface FotoPiranbenja {
   estado: EstadoIA; ataque: AtaqueNaFoto | null; achatado: boolean;
   /** Preso pela boca numa parte do urso (mordida que gruda). */
   grudado: boolean;
+  /** Distração que está fazendo (dancinha, careta, pose): o urso vê. */
+  distracao: Distracao | null;
   /** Só quando vira boneco solto (ragdoll): pose de cada parte. Ainda não vai pela rede. */
   partes: Record<Parte, PoseParte> | null;
 }
@@ -127,6 +145,8 @@ export type Evento =
   | { tipo: 'catapulta'; numero: number; vel: V3 }
   | { tipo: 'rebatida'; mao: Lado; numero: number }
   | { tipo: 'correnteEnrolou'; parte: SegUrso }
+  /** Grito do sinal: só o número da palavra-código (o Quest mostra/toca a palavra; não sabe o que ela significa). */
+  | { tipo: 'fala'; palavra: number }
   | { tipo: 'grudou'; numero: number; parte: SegUrso }
   | { tipo: 'soltouGrudado'; numero: number; como: 'sacudida' | 'arrancado' }
   | { tipo: 'fimRodada'; vencedor: 'urso' | 'piranbenja'; placar: { urso: number; piranbenja: number } }
@@ -183,6 +203,11 @@ interface Piranbenja {
   naCatapulta: Unidade | null;
   indoCatapulta: Unidade | null;
   deitadoAte: number;         // depois do chute: deitado de lado, vulnerável
+  codigo: number;             // fixo do nascimento até derreter (só no PC, para as táticas; nunca vai para a rede)
+  nasceuEm: number;
+  mira: Mira | null;          // parte do urso que a tática mandou mirar
+  rolandoAte: number; rolarDe: number; rolarDir: V3;
+  distracao: Distracao | null;
   projetilAte: number; projetilDesde: number;
   ragdoll: Ragdoll | null;
 }
@@ -270,6 +295,7 @@ export class Luta {
   private ursoAcertos: number[] = [];
   private unidades: Unidade[] = [];
   private cerebro: Cerebro | null = null;
+  private proximoCodigo = 1;
   private cerebroEm = 0;
   private ordens = new Map<number, OrdemClone>();
   private proximaUnidade = 1;
@@ -387,6 +413,7 @@ export class Luta {
       estado: 'andando', pensarEm: 0, alvo: { ...pos }, ataqueEm: 0, ataquePedido: null, ataqueTipo: 'tapa',
       armadoAte: 0, atacandoAte: 0, recuarAte: 0, atordoadoAte: 0, achatadoAte: 0, naFormacao: false, ragdoll: null,
       unidade: null, naCatapulta: null, indoCatapulta: null, deitadoAte: 0, projetilAte: 0, projetilDesde: 0,
+      codigo: this.proximoCodigo++, nasceuEm: this.tempo, mira: null, rolandoAte: 0, rolarDe: -9, rolarDir: vec(0, 0, 0), distracao: null,
     };
   }
 
@@ -510,9 +537,9 @@ export class Luta {
     this.prenderAchatados();
     this.segurarGrudados(dt);
     this.mundo.step();
+    this.acalmarRagdolls(); // quem volta a ficar de pé já passa pelo "ninguém dentro do urso" neste mesmo passo
     this.afastarDoUrso();
     this.endireitar();
-    this.acalmarRagdolls();
     this.quedas();
     if (this.rodada === 'fim' && this.tempo > this.fimEm) { this.comecarRodada(); this.eventos.push({ tipo: 'novaRodada' }); }
   }
@@ -554,7 +581,12 @@ export class Luta {
     if (this.controle.pedirClones) { const c = this.controle.pedirClones; this.controle.pedirClones = null; this.espalharClones(c.quantos, false, c.simples); }
     if (this.controle.formar) { const t = this.controle.formar; this.controle.formar = null; this.formar(t, this.controle.olhar); }
     if (this.opcoes.originalAutomatico) { this.formarAutomatico(); return; }
-    if (this.controle.espaco) { this.controle.espaco = false; this.usarEspaco(o); }
+    if (this.controle.espaco) {
+      this.controle.espaco = false;
+      // longe de formação, o Espaço rola (D-502): para onde anda; parado, para trás da câmera
+      if (this.acaoDeEspaco()) this.usarEspaco(o);
+      else { const m = this.controle.mover, g = this.controle.olhar ?? 0; this.rolar(o, lenH(vec(m.x, 0, m.z)) > 0.1 ? vec(m.x, 0, m.z) : vec(Math.sin(g), 0, Math.cos(g))); }
+    }
     if (o.naCatapulta) return; // em cima da catapulta o clique lança (usarCatapulta lê o ataque)
     // o original também "arma" o ataque como os clones (senão quem bate sem armar seria o original)
     if (this.controle.atacar) {
@@ -612,8 +644,9 @@ export class Luta {
   private pensarClone(p: Piranbenja): void {
     if (p.naFormacao || p.ragdoll || p.agarradoPor) return;
     if (p.projetilAte > this.tempo) { p.estado = 'projetil'; return; } // voando da catapulta
-    if (this.tempo < p.atordoadoAte) { p.estado = this.tempo < p.deitadoAte ? 'caido' : 'atordoado'; return; }
-    if (p.estado === 'atordoado' || p.estado === 'caido' || p.estado === 'projetil') { p.estado = 'andando'; p.pensarEm = 0; }
+    if (this.tempo < p.rolandoAte) return; // rolando
+    if (this.tempo < p.atordoadoAte) { p.estado = this.tempo < p.deitadoAte ? 'caido' : 'atordoado'; p.distracao = null; return; }
+    if (p.estado === 'atordoado' || p.estado === 'caido' || p.estado === 'projetil' || p.estado === 'rolando') { p.estado = 'andando'; p.pensarEm = 0; }
     if (p.estado === 'armando' || p.estado === 'atacando') return;
     const u = this.entrada.cabeca, pos = this.posDe(p), d = this.distanciaAoUrso(pos);
     const comp = this.opcoes.comportamento ?? 'cautelosos';
@@ -636,6 +669,13 @@ export class Luta {
     if (this.tempo < p.pensarEm) return;
     // pensa a cada ~0,25 s + reação de 0,2 a 1,2 s (o simples reage mais devagar)
     p.pensarEm = this.tempo + (0.25 + 0.2 + this.aleatorio() * 1.0) * (p.simples ? 1.6 : 1);
+    // clone complexo às vezes rola para fugir de uma pata vindo rápido: assim rolar não entrega o original (D-502)
+    if (!p.simples && comp !== 'parados' && comp !== 'aleatorio') {
+      for (const l of ['esq', 'dir'] as const) {
+        const m = this.pataNaLuta(l), fora = vec(pos.x - m.x, 0, pos.z - m.z);
+        if (len(this.velMao[l]) > EQUILIBRIO.velocidadeMinimaGolpe && lenH(fora) < 1.2 && this.aleatorio() < 0.3 && this.rolar(p, fora)) return;
+      }
+    }
     // clone complexo usa a catapulta sozinho (C21)
     if (!p.simples && comp !== 'parados' && comp !== 'aleatorio' && this.aleatorio() < 0.25) {
       const cat = this.unidades.find((x) => x.tipo === 'catapulta' && x.montada && !x.carregado && this.tempo >= x.recargaAte && !this.pbs.some((q) => q.indoCatapulta === x));
@@ -690,11 +730,17 @@ export class Luta {
 
   private visaoTatica(): VisaoTatica {
     const o = this.pbs.find((p) => p.original), f = this.foto();
+    const noAr = (p: Piranbenja) => this.tempo < p.voandoAte || p.projetilAte > this.tempo || (!p.naFormacao && this.posDe(p).y > PIRANBENJA.altura / 2 + 0.3);
     return {
       tempo: this.tempo, agua: this.agua,
-      urso: { cabeca: { ...this.entrada.cabeca }, res: this.ursoRes, equilibrio: this.equilibrio, sentado: f.urso.sentado, tonto: f.urso.tonto, noAr: this.tempo < this.ursoNoArAte },
-      original: o ? { numero: o.numero, pos: this.posDe(o) } : null,
-      clones: this.pbs.filter((p) => !p.original).map((p) => { const pos = this.posDe(p); return { numero: p.numero, pos, estado: p.estado, simples: p.simples, armadilha: p.armadilha, emFormacao: p.naFormacao, distanciaAoUrso: this.distanciaAoUrso(pos) }; }),
+      urso: { cabeca: { ...this.entrada.cabeca }, res: this.ursoRes, equilibrio: this.equilibrio, sentado: f.urso.sentado, tonto: f.urso.tonto, noAr: this.tempo < this.ursoNoArAte,
+        giro: this.entrada.giro ?? 0, agarrando: !!(this.segurando.esq || this.segurando.dir) },
+      original: o ? { numero: o.numero, codigo: o.codigo, pos: this.posDe(o), res: o.res, noAr: noAr(o) } : null,
+      clones: this.pbs.filter((p) => !p.original).map((p) => {
+        const pos = this.posDe(p);
+        return { numero: p.numero, codigo: p.codigo, pos, estado: p.estado, simples: p.simples, armadilha: p.armadilha, emFormacao: p.naFormacao, distanciaAoUrso: this.distanciaAoUrso(pos),
+          res: p.res, idade: this.tempo - p.nasceuEm, grudado: !!p.ragdoll?.grudado, noAr: noAr(p), distracao: p.distracao };
+      }),
       formacoes: f.formacoes,
     };
   }
@@ -712,18 +758,44 @@ export class Luta {
       const ordem: OrdemClone = {};
       if (o.ir && num(o.ir.x) && num(o.ir.z)) ordem.ir = vec(o.ir.x, 0, o.ir.z);
       if (o.atacar && ATAQUES_PB.includes(o.atacar)) ordem.atacar = o.atacar;
+      if (o.mirar && MIRAS.includes(o.mirar)) ordem.mirar = o.mirar;
       if (o.recuar === true) ordem.recuar = true;
       if (o.parar === true) ordem.parar = true;
       if (o.catapulta === true) ordem.catapulta = true;
+      if (o.rolar === true) ordem.rolar = true;
+      else if (o.rolar && typeof o.rolar === 'object' && num(o.rolar.x) && num(o.rolar.z)) ordem.rolar = { x: o.rolar.x, z: o.rolar.z };
+      if (o.distrair && DISTRACOES.includes(o.distrair)) ordem.distrair = o.distrair;
       this.ordens.set(Number(k), ordem);
     }
-    if (d.formar && TIPOS_FORMACAO.includes(d.formar)) this.formar(d.formar);
+    // quem estava distraindo e não recebeu mais a ordem para
+    for (const p of this.pbs) if (p.distracao && !this.ordens.get(p.numero)?.distrair) p.distracao = null;
+    const f = d.formar;
+    if (typeof f === 'string' && TIPOS_FORMACAO.includes(f)) this.formar(f);
+    else if (f && typeof f === 'object' && TIPOS_FORMACAO.includes(f.tipo)) {
+      const com = Array.isArray(f.com) ? f.com.filter((c) => num(c)).slice(0, 30) : undefined;
+      this.formar(f.tipo, undefined, { perto: f.perto === 'urso' ? 'urso' : 'original', com });
+    }
+    const c = d.criarClones;
+    if (c && typeof c === 'object' && num(c.quantos)) this.controle.pedirClones = { quantos: Math.max(1, Math.min(8, Math.round(c.quantos))), simples: c.simples === true };
+    if (num(d.falar)) this.falar(d.falar as number);
+  }
+
+  /** Grito do sinal (D-330): só o número da palavra-código vai para o Quest. */
+  falar(palavra: number): void {
+    const n = Math.round(palavra);
+    if (n >= 0 && n < TOTAL_PALAVRAS) this.eventos.push({ tipo: 'fala', palavra: n });
   }
 
   /** Cumpre a ordem com as proteções de sempre (alvos dentro do ringue; simples só dá tapa; o original não morde). */
   private seguirOrdem(p: Piranbenja, o: OrdemClone, pos: V3, d: number): boolean {
     const limitar = (a: V3) => { const r = Math.hypot(a.x, a.z), m = RINGUE.raio - 0.7; if (r > m) { a.x *= m / r; a.z *= m / r; } return a; };
     const u = this.entrada.cabeca;
+    p.mira = o.mirar ?? null;
+    if (o.rolar) {
+      const fora = o.rolar === true ? vec(pos.x - u.x, 0, pos.z - u.z) : vec(o.rolar.x, 0, o.rolar.z);
+      if (this.rolar(p, fora)) return true;
+    }
+    if (o.distrair) { p.distracao = o.distrair; p.estado = 'parado'; p.alvo = pos; return true; }
     if (o.parar) { p.estado = 'parado'; p.alvo = pos; return true; }
     if (o.recuar) { const fora = sub(pos, u), n = lenH(fora) || 1; p.estado = 'recuando'; p.alvo = limitar(vec(u.x + (fora.x / n) * 2.3, 0, u.z + (fora.z / n) * 2.3)); return true; }
     if (o.catapulta) {
@@ -741,7 +813,25 @@ export class Luta {
     return false;
   }
 
+  /** Rolar para fugir (D-502): ~2 m em 0,4 s na direção pedida; de novo só depois de 1,2 s. Rolando, a pata não agarra. */
+  private rolar(p: Piranbenja, dir: V3): boolean {
+    if (p.agarradoPor || p.ragdoll || p.naFormacao || p.projetilAte > this.tempo || this.tempo < p.atordoadoAte || this.tempo < p.voandoAte) return false;
+    if (this.tempo - p.rolarDe < ROLAR.recarga || p.estado === 'armando' || p.estado === 'atacando') return false;
+    const n = lenH(dir); if (n < 1e-3) return false;
+    p.rolarDe = this.tempo; p.rolandoAte = this.tempo + ROLAR.duracao; p.rolarDir = vec(dir.x / n, 0, dir.z / n);
+    p.estado = 'rolando'; p.distracao = null;
+    return true;
+  }
+  /** Para a tela do PC: o original pode rolar agora? */
+  podeRolar(): boolean { const o = this.pbs.find((p) => p.original); return !!o && this.rodada === 'luta' && !o.naFormacao && this.tempo - o.rolarDe >= ROLAR.recarga; }
+
   private andar(p: Piranbenja): void {
+    if (this.tempo < p.rolandoAte && !p.ragdoll && !p.agarradoPor) {
+      const v = p.corpo.linvel(), d = p.rolarDir;
+      p.corpo.setLinvel({ x: d.x * ROLAR.velocidade, y: v.y, z: d.z * ROLAR.velocidade }, true);
+      return;
+    }
+    if (p.estado === 'rolando') p.estado = 'andando';
     if (p.agarradoPor || p.ragdoll || p.naFormacao || this.tempo < p.voandoAte || this.tempo < p.atordoadoAte) return;
     const pos = p.corpo.translation();
     if (pos.y > PIRANBENJA.altura / 2 + 0.25) return; // no ar não anda
@@ -837,6 +927,7 @@ export class Luta {
       return;
     }
     if (p.naCatapulta) this.descarregar(p);
+    p.distracao = null;
     // rebater o projétil da catapulta: o golpe acerta antes de ele chegar no corpo (C22)
     if (p.projetilAte > this.tempo) { p.projetilAte = 0; fator *= 1.3; if (!vizinho) this.eventos.push({ tipo: 'rebatida', mao, numero: p.numero }); }
     if (this.tempo < p.deitadoAte) { fator *= 1.5; p.deitadoAte = 0; } // deitado depois do chute: vulnerável
@@ -988,7 +1079,7 @@ export class Luta {
       if (!fechou || antes || len(this.velMao[l]) > EQUILIBRIO.agarrarAte || this.tempo < this.ursoNoArAte || this.tempo < this.ursoTontoAte) continue;
       let melhor: Piranbenja | null = null, md = alcance;
       for (const p of this.pbs) {
-        if (p.agarradoPor || p.projetilAte > this.tempo) continue; // projétil da catapulta não se agarra no ar (C22)
+        if (p.agarradoPor || p.projetilAte > this.tempo || this.tempo < p.rolandoAte) continue; // projétil não se agarra no ar (C22); rolando escapa da pata (D-502)
         const c = this.posDe(p);
         const yEixo = Math.max(c.y - PIRANBENJA.altura / 2 + PIRANBENJA.raio, Math.min(c.y + PIRANBENJA.altura / 2 - PIRANBENJA.raio, m.pos.y));
         const d = Math.hypot(m.pos.x - c.x, m.pos.y - yEixo, m.pos.z - c.z);
@@ -1071,13 +1162,18 @@ export class Luta {
     const SAIDA: Record<AtaquePB, [number, number]> = { morder: [0.18, 0.27], tapa: [0.3, 0.02], soco: [0.3, 0.15], cabecada: [0.22, 0.3], chute: [0.32, -0.25] };
     const [fr, alt] = SAIDA[ataque];
     const origem = vec(c.x + ux * fr, c.y + alt, c.z + uz * fr);
-    let melhor: { seg: Segmento; q: V3; t: number; d: number } | null = null;
+    const tipo = TIPO_DO_ATAQUE[ataque];
+    const alcance = tipo === 'impacto' ? ATAQUES_IMPACTO[ataque as AtaqueImpacto].alcance : ALCANCE_ATAQUE;
+    // mirar (D-329): entre as partes que o ataque alcança, prefere a da mira; se nenhuma está ao alcance, pega a mais perto
+    const naMira = (s: SegUrso) => { const z = zonaDoSegmento(s); return p.mira === 'pernas' ? z === 'perna' : p.mira === 'barriga' ? z === 'tronco' : p.mira === 'cabeca' ? z === 'cabeca' : z === 'braco' || z === 'pata'; };
+    type Achado = { seg: Segmento; q: V3; t: number; d: number };
+    let melhor: Achado | null = null, mirado: Achado | null = null;
     for (const seg of this.esqueleto.segs) {
       const { q, t } = pertoNoSegmento(origem, seg.a, seg.b), d = len(sub(origem, q)) - seg.r;
       if (!melhor || d < melhor.d) melhor = { seg, q, t, d };
+      if (p.mira && naMira(seg.nome) && d <= alcance && (!mirado || d < mirado.d)) mirado = { seg, q, t, d };
     }
-    const tipo = TIPO_DO_ATAQUE[ataque];
-    const alcance = tipo === 'impacto' ? ATAQUES_IMPACTO[ataque as AtaqueImpacto].alcance : ALCANCE_ATAQUE;
+    if (mirado) melhor = mirado;
     if (!melhor || melhor.d > alcance) return false;
     const k = Math.max(1e-3, melhor.d + melhor.seg.r);
     const ponto = vec(melhor.q.x + ((origem.x - melhor.q.x) / k) * melhor.seg.r, melhor.q.y + ((origem.y - melhor.q.y) / k) * melhor.seg.r, melhor.q.z + ((origem.z - melhor.q.z) / k) * melhor.seg.r);
@@ -1182,11 +1278,14 @@ export class Luta {
   }
 
   /** Clones que podem entrar numa formação: livres, até 4 m do original, os mais perto primeiro. */
+  private livreParaFormar(p: Piranbenja): boolean {
+    return !p.unidade && !p.naCatapulta && !p.ragdoll && !p.agarradoPor && !p.armadilha && p.projetilAte <= this.tempo
+      && this.tempo >= p.atordoadoAte && this.tempo >= p.achatadoAte && this.tempo >= p.rolandoAte;
+  }
   private livresParaFormar(): Piranbenja[] {
     const o = this.pbs.find((p) => p.original); if (!o) return [];
     const po = this.posDe(o);
-    return this.pbs.filter((p) => !p.original && !p.unidade && !p.naCatapulta && !p.ragdoll && !p.agarradoPor && !p.armadilha
-      && p.projetilAte <= this.tempo && this.tempo >= p.atordoadoAte && this.tempo >= p.achatadoAte && lenH(sub(this.posDe(p), po)) <= ALCANCE_FORMAR)
+    return this.pbs.filter((p) => !p.original && this.livreParaFormar(p) && lenH(sub(this.posDe(p), po)) <= ALCANCE_FORMAR)
       .sort((a, b) => lenH(sub(this.posDe(a), po)) - lenH(sub(this.posDe(b), po)));
   }
   /** Para a roda da tecla F: quantos clones há perto e quantos cada formação precisa. */
@@ -1196,14 +1295,26 @@ export class Luta {
     return r;
   }
 
-  /** O original manda montar: os clones mais perto vão para ~2 m na frente dele. */
-  formar(tipo: TipoFormacao, olhar?: number): boolean {
+  /** O original manda montar: os clones mais perto vão para ~2 m na frente dele.
+   *  Pela tática (D-329): "perto do urso" monta a ~1,6 m do urso, do lado de onde vêm os clones; "com" usa só os clones
+   *  escolhidos (códigos), os mais perto do lugar primeiro, sem o limite de 4 m do original. */
+  formar(tipo: TipoFormacao, olhar?: number, op: { perto?: 'original' | 'urso'; com?: number[] } = {}): boolean {
     const o = this.pbs.find((p) => p.original); if (!o || this.rodada !== 'luta') return false;
-    const F = FORMACOES[tipo], livres = this.livresParaFormar();
+    const F = FORMACOES[tipo];
+    const escolhidos = op.com ? this.pbs.filter((p) => op.com!.includes(p.codigo) && !p.original && this.livreParaFormar(p)) : null;
+    let livres = escolhidos ?? this.livresParaFormar();
     if (livres.length < F.clones) return false;
     const po = this.posDe(o), u = this.entrada.cabeca;
-    const { frente } = eixosDoGiro(olhar ?? Math.atan2(-(u.x - po.x), -(u.z - po.z)));
-    let centro = vec(po.x + frente.x * 2, 0, po.z + frente.z * 2);
+    // de onde a formação parte: o original, ou o meio dos clones escolhidos
+    let base = po;
+    if (escolhidos) { const m = escolhidos.reduce((a, p) => { const q = this.posDe(p); return vec(a.x + q.x, 0, a.z + q.z); }, vec(0, 0, 0)); base = vec(m.x / escolhidos.length, 0, m.z / escolhidos.length); }
+    const { frente } = eixosDoGiro(olhar ?? Math.atan2(-(u.x - base.x), -(u.z - base.z)));
+    let centro = vec(base.x + frente.x * 2, 0, base.z + frente.z * 2);
+    if (op.perto === 'urso') {
+      const d = vec(base.x - u.x, 0, base.z - u.z), n = lenH(d) || 1;
+      centro = vec(u.x + (d.x / n) * 1.6, 0, u.z + (d.z / n) * 1.6);
+    }
+    if (escolhidos) livres = [...livres].sort((a, b) => lenH(sub(this.posDe(a), centro)) - lenH(sub(this.posDe(b), centro)));
     const rc = lenH(centro), mx = RINGUE.raio - 1.0; if (rc > mx) centro = vec((centro.x / rc) * mx, 0, (centro.z / rc) * mx);
     // não monta em cima do urso
     const du = vec(centro.x - u.x, 0, centro.z - u.z), nd = lenH(du);
@@ -1233,7 +1344,7 @@ export class Luta {
   }
 
   private entrarNaVaga(u: Unidade, i: number, p: Piranbenja, dur: number): void {
-    p.unidade = u; p.naFormacao = true; p.indoCatapulta = null; p.estado = 'formacao'; p.ataquePedido = null; p.deitadoAte = 0;
+    p.unidade = u; p.naFormacao = true; p.indoCatapulta = null; p.estado = 'formacao'; p.ataquePedido = null; p.deitadoAte = 0; p.distracao = null; p.rolandoAte = 0;
     p.corpo.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true); p.corpo.setAngvel({ x: 0, y: 0, z: 0 }, true); p.corpo.lockRotations(true, true);
     p.corpo.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
     u.membros[i] = { p, de: dur > 0 ? this.posDe(p) : null, t0: this.tempo, dur };
@@ -1534,7 +1645,7 @@ export class Luta {
   /** Original automático (Quest solo, testes): de vez em quando manda montar uma formação. */
   private formarAutomatico(): void {
     const comp = this.opcoes.comportamento ?? 'cautelosos';
-    if (this.opcoes.semIA || comp === 'parados' || comp === 'aleatorio' || this.tempo < this.formarEm) return;
+    if (this.cerebro || this.opcoes.semIA || comp === 'parados' || comp === 'aleatorio' || this.tempo < this.formarEm) return; // com tática ligada, quem decide é ela (D-329)
     this.formarEm = this.tempo + 10 + this.aleatorio() * 8;
     if (this.unidades.length) return;
     const tem = this.livresParaFormar().length, ok = TIPOS_FORMACAO.filter((t) => tem >= FORMACOES[t].clones);
@@ -1756,7 +1867,7 @@ export class Luta {
         return {
           numero: p.numero, pos: this.posDe(p), rot: [r.x, r.y, r.z, r.w], voando: this.tempo < p.voandoAte, agarrado: !!p.agarradoPor,
           estado: p.estado, ataque: atacando ? (p.ataqueTipo === 'soco' ? 'socar' : p.ataqueTipo) as AtaqueNaFoto : null,
-          achatado: this.tempo < p.achatadoAte, partes, grudado: !!p.ragdoll?.grudado,
+          achatado: this.tempo < p.achatadoAte, partes, grudado: !!p.ragdoll?.grudado, distracao: p.distracao,
         };
       }),
     };

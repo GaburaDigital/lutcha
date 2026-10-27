@@ -46,7 +46,7 @@ with servidor(), sync_playwright() as p:
     cab_pc = J(pc, 'const c = t.luta.entradaUrso.cabeca; return [c.x, c.y, c.z].map(v => +v.toFixed(2))')
     confere('cabeça do urso chegando ao PC', all(abs(a - b) < 0.05 for a, b in zip(cab_q, cab_pc)), f'Quest {cab_q} · PC {cab_pc}')
     chaves = J(quest, "return [...new Set(t.fotos.at(-1).f.piranbenjas.flatMap(p => Object.keys(p)))].sort()")
-    confere('o Quest não recebe quem é o original', chaves == ['achatado', 'agarrado', 'ataque', 'estado', 'grudado', 'numero', 'partes', 'pos', 'rot', 'voando'], chaves)
+    confere('o Quest não recebe quem é o original', chaves == ['achatado', 'agarrado', 'ataque', 'distracao', 'estado', 'grudado', 'numero', 'partes', 'pos', 'rot', 'voando'], chaves)
     # números sorteados de novo quando o PC cria clones (tecla C)
     antes = J(quest, 'return t.fotos.at(-1).f.piranbenjas.map(p => p.numero)')
     pc.bring_to_front(); pc.keyboard.press('c'); time.sleep(1.5)
@@ -94,9 +94,13 @@ with servidor(), sync_playwright() as p:
     solo.evaluate('() => {' + VR + '}'); solo.evaluate('() => window.__vr.ligar()'); J(solo, 't.config.esticar = 1')
     alvo = J(solo, "const f = t.luta.foto(); return f.piranbenjas.find(p => p.estado === 'formacao').pos")
     solo.evaluate("(a) => { __vr.dedos('dir', 0, 0); __vr.maoMundo('esq', -0.6, 1.4, 2.4); __vr.maoMundo('dir', a.x + 0.6, 0.6, a.z + 0.6); }", alvo); time.sleep(0.8)
-    solo.evaluate("(a) => __vr.maoMundo('dir', a.x, 0.6, a.z + 0.05)", alvo); time.sleep(0.8)
+    solo.evaluate("(a) => __vr.maoMundo('dir', a.x, 0.6, a.z + 0.05)", alvo)
+    contorno = False
+    for _ in range(30):  # o Chrome sem tela desenha poucos quadros: espera até 3 s
+        time.sleep(0.1); contorno = J(solo, 'return t.contornoVisivel')
+        if contorno: break
     solo.screenshot(path=F + 'rede_08_contorno_da_mao.png')
-    confere('Quest: a mão dentro do Piranbenja vira contorno', J(solo, 'return t.contornoVisivel') is True, J(solo, 'return t.efetiva'))
+    confere('Quest: a mão dentro do Piranbenja vira contorno', contorno is True, J(solo, 'return t.efetiva'))
     # caiu sentado: a visão desce ~1 m
     J(solo, 't.luta.cairSentado()'); menor = 0
     for _ in range(30):  # o Chrome sem tela desenha poucos quadros: espera até 3 s pela descida

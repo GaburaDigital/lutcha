@@ -19,7 +19,7 @@ import { abrirCanal, type Canal } from '../rede/canal';
 import { AGUA, CATAPULTA, TIPOS_FORMACAO, codigoDeSala, saidaCatapulta, type AtaqueImpacto, type TipoFormacao } from '../simulacao/regras';
 import { Formacoes, Onomatopeias, Piranbenjas, UrsoDeFora, criarCena, criarRingue } from './visual';
 import { T } from '../textos';
-import { ligarTecnico } from './tecnico_pc'; // táticas do técnico (conversa "Programação por blocos")
+import { PALAVRA_DO_SINAL, ligarTecnico } from './tecnico_pc'; // táticas do técnico (conversa "Programação por blocos")
 
 export interface ConfigPcSolo { urso: JeitoUrso; clones: Comportamento; iniciais: number; ajudas: boolean }
 const JEITOS: JeitoUrso[] = ['parado', 'bobo', 'ofensivo'];
@@ -105,7 +105,9 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
   // só nesta tela: um anel aqua no chão marca o original (o jogador sabe quem ele é; o Quest nunca sabe)
   const marca = new THREE.Mesh(new THREE.RingGeometry(0.26, 0.34, 12), new THREE.MeshBasicMaterial({ color: '#4fd6d0', side: THREE.DoubleSide }));
   marca.rotation.x = -Math.PI / 2; cena.add(marca);
-  ligarTecnico(luta, raiz, cena); // teclas 1–5, U I O P, Tab e G; painel do técnico
+  const tecnicoPC = ligarTecnico(luta, raiz, cena); // teclas 1–5, U I O P, Tab e G; painel do técnico
+  // grito do sinal (D-330): além do painel do PC, vira evento "fala" da luta (só o número da palavra vai para o Quest)
+  { const antes = tecnicoPC.tecnico.aoSinal; tecnicoPC.tecnico.aoSinal = (i) => { antes?.(i); luta.falar(PALAVRA_DO_SINAL[i] ?? i); }; }
 
   // ---------- rede (só no modo de rede) ----------
   let canal: Canal | null = null;
@@ -257,6 +259,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
     if (ev.tipo === 'formacao') onos.mostrar(T.gritos[ev.nome], { ...ev.centro, y: 2.2 }, '#c58fff', 0.55, 1.4);
     if (ev.tipo === 'formacaoDesfeita') escrever(ev.strike ? 'Formação desmanchou: STRIKE!' : 'Formação desfeita');
     if (ev.tipo === 'catapulta') escrever(`Catapulta: lançou a ${Math.hypot(ev.vel.x, ev.vel.y, ev.vel.z).toFixed(1)} m/s`);
+    if (ev.tipo === 'fala') escrever(`Sinal: palavra ${ev.palavra + 1}`);
     if (ev.tipo === 'correnteEnrolou') { escrever('A corrente enrolou na perna do urso'); const c = luta.entradaUrso.cabeca; onos.mostrar(T.urso.enrolou, { ...c, y: 1.0 }, '#c58fff', 0.45, 1.2); }
     if (ev.tipo === 'strike') { escrever('STRIKE!'); onos.mostrar(T.strike, { x: 0, y: 2.5, z: 0 }, '#ff7a6b', 1.0, 1.4); }
     if (ev.tipo === 'derreteu') escrever('Um clone derreteu');

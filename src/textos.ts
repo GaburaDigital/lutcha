@@ -30,7 +30,7 @@ const PT = {
   roda: { titulo: 'Formações', precisa: 'precisa de', clones: 'clones', perto: 'clones perto', solte: 'mova o mouse e solte o F' },
   espaco: { escalar: 'Espaço: escalar', catapulta: 'Espaço: subir na catapulta', descer: 'Espaço: descer', mirar: 'Mouse mira · clique lança' },
   teclas: { andar: 'Andar', camera: 'Câmera', tapa: 'Tapa', soco: 'Soco', simples: 'Clones simples', complexos: 'Clones complexos', pausa: 'Pausa', mouse: 'Soltar o mouse',
-    roda: 'roda: trocar', formacoes: 'Formações', espaco: 'Escalar / catapulta' },
+    roda: 'roda: trocar', formacoes: 'Formações', espaco: 'Rolar / escalar' },
   pc: {
     titulo: 'Piranbenja solo (teste)', urso: 'Urso', clones: 'Clones', iniciais: 'Clones no começo', ajudas: 'Ajudas visuais',
     recomecar: 'Recomeçar', continuar: 'Continuar', clique: 'Clique na tela para jogar', agua: 'Água', resUrso: 'Urso',
@@ -70,7 +70,7 @@ const EN: Textos = {
   roda: { titulo: 'Formations', precisa: 'needs', clones: 'clones', perto: 'clones nearby', solte: 'move the mouse and release F' },
   espaco: { escalar: 'Space: climb', catapulta: 'Space: get on the catapult', descer: 'Space: get down', mirar: 'Mouse aims · click launches' },
   teclas: { andar: 'Move', camera: 'Camera', tapa: 'Slap', soco: 'Punch', simples: 'Simple clones', complexos: 'Complex clones', pausa: 'Pause', mouse: 'Free the mouse',
-    roda: 'wheel: switch', formacoes: 'Formations', espaco: 'Climb / catapult' },
+    roda: 'wheel: switch', formacoes: 'Formations', espaco: 'Roll / climb' },
   pc: {
     titulo: 'Piranbenja solo (test)', urso: 'Bear', clones: 'Clones', iniciais: 'Clones at start', ajudas: 'Visual helpers',
     recomecar: 'Restart', continuar: 'Resume', clique: 'Click the screen to play', agua: 'Water', resUrso: 'Bear',

@@ -18,7 +18,8 @@ import { codificarEntrada, decodificarFoto } from '../rede/protocolo';
 import { CORPO_URSO, pataNaSuperficie, pertoEntreSegmentos, type CapsulaPB } from '../simulacao/corpoUrso';
 import { abrirCanal, type Canal } from '../rede/canal';
 import { Formacoes, Onomatopeias, Piranbenjas, criarCena, criarRingue } from './visual';
-import { T } from '../textos';
+import { LINGUA, T } from '../textos';
+import { PALAVRAS_CODIGO } from '../simulacao/taticas'; // só a lista de palavras (a tática nunca vem para o Quest)
 
 export interface OpcoesQuest { modo: 'online' | 'solo'; tipoCanal: 'trystero' | 'local'; codigo?: string }
 
@@ -391,6 +392,13 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       sentadoAte = performance.now() / 1000 + ev.segundos; vibrar('esq', ...VIBRACAO.levarGolpe); vibrar('dir', ...VIBRACAO.levarGolpe);
       const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.urso.caiu, { x: c.x, y: c.y - 0.2, z: c.z - 1.4 }, '#c58fff', 0.35, 1.2);
       if (config.decolagem === 'escurecer') piscar = 0;
+    }
+    if (ev.tipo === 'fala' && Number.isInteger(ev.palavra) && PALAVRAS_CODIGO[ev.palavra]) {
+      // os Piranbenjas gritam a palavra do sinal (o urso não sabe o que ela significa); aparece no meio deles
+      const ps = ultimaFoto?.piranbenjas ?? [], n = ps.length || 1;
+      const m = ps.reduce((a, p) => ({ x: a.x + p.pos.x / n, z: a.z + p.pos.z / n }), { x: 0, z: 0 });
+      const w = PALAVRAS_CODIGO[ev.palavra];
+      onos.mostrar((LINGUA === 'en' ? w.en : w.pt).toUpperCase() + '!', { x: m.x, y: 1.8, z: m.z }, '#ffe066', 0.4, 1.6);
     }
     if (ev.tipo === 'ursoTonto') tontoAte = performance.now() / 1000 + ev.segundos;
     if (ev.tipo === 'ursoEmpurrado' && !voo) { rig.position.x += ev.x; rig.position.z += ev.z; } // esbarrou numa formação

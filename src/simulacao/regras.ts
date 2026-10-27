@@ -213,3 +213,15 @@ export function codigoDeSala(aleatorio: () => number = Math.random): string {
   for (let i = 0; i < 5; i++) c += ALFABETO_SALA[Math.floor(aleatorio() * ALFABETO_SALA.length)];
   return c;
 }
+
+/** Rolar para fugir (D-502, C27): ~2 m em 0,4 s; de novo só depois de 1,2 s; rolando, a pata não agarra (golpes pegam). */
+export const ROLAR = { velocidade: 5, duracao: 0.4, recarga: 1.2 };
+/** Distrações (D-318): só psicológicas, sem efeito no jogo; o urso vê. */
+export const DISTRACOES = ['dancinha', 'careta', 'pose'] as const;
+export type Distracao = typeof DISTRACOES[number];
+/** Onde a tática pode mandar mirar no urso (D-329). */
+export const MIRAS = ['pernas', 'barriga', 'cabeca', 'bracos'] as const;
+export type Mira = typeof MIRAS[number];
+/** Quantas palavras-código existem (a lista com os textos fica nas táticas; na rede vai só o número, D-221). */
+export const TOTAL_PALAVRAS = 12;
+

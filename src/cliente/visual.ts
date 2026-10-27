@@ -141,7 +141,9 @@ export class Piranbenjas {
         // armar inclina para trás (o aviso do ataque); atacar joga para frente; martelada achata
         const forte = p.ataque === 'cabecada' || p.ataque === 'chute';
         const incl = p.estado === 'armando' ? (forte ? -0.6 : -0.38) : p.estado === 'atacando' ? (p.ataque === 'chute' ? -0.9 : forte ? 0.8 : 0.45) : 0;
-        b.corpo.rotation.x += (incl - b.corpo.rotation.x) * 0.3;
+        if (p.estado === 'rolando') b.corpo.rotation.x = (agora * 16) % (Math.PI * 2); // cambalhota para frente
+        else b.corpo.rotation.x += (incl - b.corpo.rotation.x) * 0.3;
+        this.posarDistracao(b, p, agora);
         if (p.achatado) { b.corpo.scale.set(1.35, 0.45, 1.35); b.corpo.position.y = -PIRANBENJA.altura * 0.27; }
         else { b.corpo.scale.setScalar(1); b.corpo.position.y = 0; }
       }
@@ -190,6 +192,15 @@ export class Piranbenjas {
     E.rotation.x += (ex - E.rotation.x) * 0.45; E.rotation.z += (ez - E.rotation.z) * 0.45;
     cab.position.z = LAYOUT_PARTES.cabeca.c.z + cabZ;
     b.boca.visible = p.ataque === 'morder' && (armando || atacando);
+  }
+  /** Distrações (D-318): dancinha balança e pula, careta estica a cabeça e abre a boca, pose bizarra levanta os braços. */
+  private posarDistracao(b: Boneco, p: FotoPiranbenja, agora: number): void {
+    const d = p.distracao, cab = b.partes.cabeca;
+    b.corpo.rotation.z = d === 'dancinha' ? Math.sin(agora * 10) * 0.25 : 0;
+    if (d === 'dancinha') b.corpo.position.y = Math.abs(Math.sin(agora * 10)) * 0.08;
+    cab.scale.set(d === 'careta' ? 1.25 + Math.sin(agora * 14) * 0.1 : 1, d === 'careta' ? 0.8 : 1, 1);
+    if (d === 'careta') b.boca.visible = true;
+    if (d === 'pose') { b.partes.bracoD.rotation.z = 2.6; b.partes.bracoE.rotation.z = -1.2; b.partes.bracoE.rotation.x = -1.4; }
   }
   /** Ajuda do teste: a parte atingida muda de cor (laranja = dano, ciano = impacto; mais forte = mais em cheio). */
   piscar(numero: number, zona: Zona, cor: string, forca: number, tempo = performance.now() / 1000): void {

@@ -7,9 +7,9 @@
 // As formações vão só como lugar, tipo e resistência (9 bytes cada), sem dizer quem está nelas.
 
 import { ESTADOS_IA, type EntradaUrso, type Foto } from '../simulacao/luta';
-import { TIPOS_FORMACAO } from '../simulacao/regras';
+import { DISTRACOES, TIPOS_FORMACAO } from '../simulacao/regras';
 
-export const VERSAO_FORMATO = 4; // 4: equilíbrio, sentado/tonto, cabeçada e chute, formações (C20–C23)
+export const VERSAO_FORMATO = 5; // 4: equilíbrio, sentado/tonto, cabeçada e chute, formações (C20–C23) · 5: distrações e rolar (C27)
 /** Cabeçalho da foto: 21 bytes; cada Piranbenja 18; cada formação 9. */
 const CABECALHO = 21, POR_PB = 18, POR_FORMACAO = 9;
 const FOTO = 1, ENTRADA = 2;
@@ -40,7 +40,8 @@ export function codificarFoto(f: Foto): ArrayBuffer {
     for (const c of p.rot) { d.setInt16(o, q16(c)); o += 2; }
     // marcas: 1 voando · 2 agarrado · 4 achatado · 8 grudado · bits 4 a 7 = estado do clone
     d.setUint8(o++, (p.voando ? 1 : 0) | (p.agarrado ? 2 : 0) | (p.achatado ? 4 : 0) | (p.grudado ? 8 : 0) | (Math.max(0, ESTADOS_IA.indexOf(p.estado)) << 4));
-    d.setUint8(o++, ATAQUES.indexOf(p.ataque)); // 0 nenhum · 1 morder · 2 tapa · 3 socar · 4 cabeçada · 5 chute
+    // bits 0 a 3: ataque (0 nenhum · 1 morder · 2 tapa · 3 socar · 4 cabeçada · 5 chute) · bits 4 e 5: distração (0 nenhuma · 1 dancinha · 2 careta · 3 pose)
+    d.setUint8(o++, Math.max(0, ATAQUES.indexOf(p.ataque)) | ((p.distracao ? DISTRACOES.indexOf(p.distracao) + 1 : 0) << 4));
   }
   for (let i = 0; i < nf; i++) {
     const m = f.formacoes[i];
@@ -71,7 +72,8 @@ export function decodificarFoto(buf: ArrayBuffer): Foto | null {
     for (let k = 0; k < 4; k++) { rot[k] = d.getInt16(o) / 32767; o += 2; }
     const fl = d.getUint8(o++), at = d.getUint8(o++);
     const estado = ESTADOS_IA[fl >> 4] ?? 'andando';
-    piranbenjas.push({ numero, pos, rot, voando: !!(fl & 1), agarrado: !!(fl & 2), achatado: !!(fl & 4), grudado: !!(fl & 8), estado, ataque: ATAQUES[at] ?? null, partes: null });
+    const dist = (at >> 4) & 3;
+    piranbenjas.push({ numero, pos, rot, voando: !!(fl & 1), agarrado: !!(fl & 2), achatado: !!(fl & 4), grudado: !!(fl & 8), estado, ataque: ATAQUES[at & 15] ?? null, partes: null, distracao: dist ? DISTRACOES[dist - 1] : null });
   }
   const formacoes: Foto['formacoes'] = [];
   for (let i = 0; i < nf; i++) {

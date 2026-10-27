@@ -83,7 +83,7 @@ with servidor(), sync_playwright() as p:
       const antes = s.l.testeNumeros(); s.l.testeCriarClones(2); const depois = s.l.testeNumeros();
       const repetidos = antes.filter((n) => depois.includes(n)).length;
       return { chaves, bytes: bin.byteLength, n: f.piranbenjas.length, nf: f.formacoes.length, iguais: JSON.stringify(volta.piranbenjas.map(p => p.numero)) === JSON.stringify(f.piranbenjas.map(p => p.numero)), repetidos, total: depois.length };""")
-    confere('foto sem marca do original', r['chaves'] == ['achatado', 'agarrado', 'ataque', 'estado', 'grudado', 'numero', 'partes', 'pos', 'rot', 'voando'], r['chaves'])
+    confere('foto sem marca do original', r['chaves'] == ['achatado', 'agarrado', 'ataque', 'distracao', 'estado', 'grudado', 'numero', 'partes', 'pos', 'rot', 'voando'], r['chaves'])
     confere('foto binária: 21 + 18 por Piranbenja + 9 por formação', r['bytes'] == 21 + 18 * r['n'] + 9 * r['nf'] and r['iguais'], r['bytes'])
     confere('números sorteados de novo ao criar clones', r['repetidos'] <= 1 and r['total'] == 6, r)
 
@@ -376,6 +376,66 @@ with servidor(), sync_playwright() as p:
       return { vistas, temOriginal, socos: ev.filter((e) => e.tipo === 'ursoGolpeado' && e.numero === cs[0]).length,
         foi: Math.hypot(p1.x - 3, p1.z + 1) < 0.5, dentro: Math.hypot(p2.x, p2.z) < 5.5 };""")
     confere('tática do técnico manda nos clones (com proteções)', r['vistas'] > 10 and r['temOriginal'] and r['socos'] >= 1 and r['foi'] and r['dentro'], r)
+    # ---------- pedidos da conversa das táticas (C27: D-327 a D-330) ----------
+    TAT = """s.nova({ semIA: false, comportamento: 'parados', clonesIniciais: 4, ursoBot: 'parado' }); const o = s.l.numeroDoOriginal();
+      s.l.testeColocar(o, { x: -3, y: 0.47, z: -1 }); s.clone().forEach((c, i) => s.l.testeColocar(c, { x: -1.5 + i, y: 0.47, z: -1 }));
+      let V = null, D = {}; s.l.definirCerebro((v) => { V = v; const d = D; D = {}; return typeof d === 'function' ? d(v) : d; }); s.passos(20);"""
+    # 46) código fixo: os números da rede mudam quando nascem clones; o código de cada um não
+    r = S(pg, TAT + """const antes = new Map(V.clones.map((c) => [c.codigo, c.pos])), nAntes = V.clones.map((c) => c.numero);
+      s.l.testeCriarClones(2); s.passos(16); // a tática é consultada a cada 0,25 s (15 passos)
+      const mesmos = V.clones.filter((c) => antes.has(c.codigo)), longe = mesmos.filter((c) => Math.hypot(c.pos.x - antes.get(c.codigo).x, c.pos.z - antes.get(c.codigo).z) > 0.6).length;
+      return { codigos: mesmos.length, novos: V.clones.length - mesmos.length, numerosRepetidos: V.clones.filter((c) => nAntes.includes(c.numero)).length, longe, orig: !!V.original.codigo,
+        rede: JSON.stringify(s.l.foto()).includes('codigo') };""")
+    confere('código fixo por Piranbenja (só na visão da tática)', r['codigos'] == 4 and r['novos'] == 2 and r['longe'] <= 1 and r['orig'] and not r['rede'], r)
+    # 47) visão com resistência, idade, grudado e no ar de cada clone; giro do urso e se está agarrando
+    r = S(pg, TAT + """const c = V.clones[0]; return { campos: Object.keys(c).sort(), urso: Object.keys(V.urso).sort(), idade: c.idade > 0.2, res: c.res };""")
+    confere('visão da tática com os campos novos', all(k in r['campos'] for k in ['res', 'idade', 'grudado', 'noAr', 'codigo']) and 'giro' in r['urso'] and 'agarrando' in r['urso'] and r['idade'], r)
+    # 48) a tática cria clones (gasta água)
+    r = S(pg, TAT + """const n0 = V.clones.length, a0 = s.l.aguaAtual; D = { criarClones: { quantos: 3, simples: true } }; s.passos(32);
+      return { mais: V.clones.length - n0, agua: Math.round(a0 - s.l.aguaAtual) };""")
+    confere('a tática cria clones', r['mais'] == 3 and r['agua'] >= 11, r)
+    # 49) formar perto do urso, só com os clones escolhidos
+    r = S(pg, TAT + """s.l.testeCriarClones(3); s.passos(10); const escolhidos = V.clones.slice(0, 4).map((c) => c.codigo);
+      D = { formar: { tipo: 'muralha', perto: 'urso', com: escolhidos } }; s.passos(20);
+      const u = s.l.testeUnidades()[0], cod = new Map(V.clones.map((c) => [c.numero, c.codigo]));
+      const f = s.l.foto().formacoes[0], cab = s.l.entradaUrso.cabeca;
+      return { ok: !!u, mesmos: u ? u.membros.every((n) => escolhidos.includes(cod.get(n))) : false, longeDoUrso: f ? +Math.hypot(f.centro.x - cab.x, f.centro.z - cab.z).toFixed(2) : -1 };""")
+    confere('formação perto do urso com os clones escolhidos', r['ok'] and r['mesmos'] and 1.3 < r['longeDoUrso'] < 1.9, r)
+    # 50) mirar as pernas: o soco (que pegaria a barriga) vai na perna
+    r = S(pg, TAT + """const c = V.clones[0]; s.l.testeColocar(c.numero, { x: 0, y: 0.47, z: 2.45 });
+      let partes = []; D = (v) => ({ ordens: { [v.clones.find((x) => x.codigo === c.codigo).numero]: { atacar: 'soco', mirar: 'pernas' } } });
+      for (let i = 0; i < 120 && !partes.length; i++) { if (i % 15 === 0) D = (v) => ({ ordens: { [v.clones.find((x) => x.codigo === c.codigo).numero]: { atacar: 'soco', mirar: 'pernas' } } });
+        s.l.avancar(1 / 60); partes = s.l.tirarEventos().filter((e) => e.tipo === 'ursoGolpeado').map((e) => e.parte); }
+      return partes;""")
+    confere('mirar as pernas', len(r) >= 1 and r[0].startswith('perna'), r)
+    # 51) rolar: ~2 m em 0,4 s, para longe do urso; de novo só depois de 1,2 s
+    r = S(pg, TAT + """const c = V.clones[1], p0 = s.l.foto().piranbenjas.find((p) => p.numero === c.numero).pos;
+      D = { ordens: { [c.numero]: { rolar: { x: 1, z: 0 } } } }; let estado = ''; for (let i = 0; i < 16 && estado !== 'rolando'; i++) { s.passos(1); estado = s.l.testeEstado(c.numero).estado; } s.passos(30);
+      const q = V.clones.find((x) => x.codigo === c.codigo), p1 = q.pos;
+      D = { ordens: { [q.numero]: { rolar: { x: 1, z: 0 } } } }; s.passos(16); const p2 = V.clones.find((x) => x.codigo === c.codigo).pos;
+      return { estado, andou: +(p1.x - p0.x).toFixed(2), deNovo: +(p2.x - p1.x).toFixed(2) };""")
+    confere('rolar: ~2 m e espera para rolar de novo', r['estado'] == 'rolando' and 1.5 < r['andou'] < 2.6 and abs(r['deNovo']) < 0.4, r)
+    # 52) Espaço longe de formação: o original rola para onde anda
+    r = S(pg, TAT + """const o2 = s.l.numeroDoOriginal(), p0 = s.l.foto().piranbenjas.find((p) => p.numero === o2).pos; const sem = s.l.acaoDeEspaco();
+      s.l.controle.mover = { x: 0, z: -1 }; s.l.controle.espaco = true; s.passos(1); s.l.controle.mover = { x: 0, z: 0 }; s.passos(30);
+      const p1 = s.l.foto().piranbenjas.find((p) => p.numero === s.l.numeroDoOriginal()).pos; return { sem, andou: +(p0.z - p1.z).toFixed(2) };""")
+    confere('Espaço longe de formação rola o original', r['sem'] is None and r['andou'] > 1.5, r)
+    # 53) distração: aparece na foto (também pela rede) e acaba quando a ordem acaba
+    r = S(pg, TAT + """const c = V.clones[2]; D = { ordens: { [c.numero]: { distrair: 'dancinha' } } }; s.passos(16);
+      const f = s.l.foto(), P = __lab.protocolo, volta = P.decodificarFoto(P.codificarFoto(f));
+      const na = (ff) => ff.piranbenjas.filter((p) => p.distracao).map((p) => p.distracao);
+      s.passos(32); return { foto: na(f), rede: na(volta), depois: na(s.l.foto()) };""")
+    confere('distração na foto e na rede', r['foto'] == ['dancinha'] and r['rede'] == ['dancinha'] and r['depois'] == [], r)
+    # 54) fala: só o número da palavra; fora da lista é ignorado
+    r = S(pg, TAT + """s.ev = []; D = { falar: 3 }; const ev = s.passos(16).filter((e) => e.tipo === 'fala'); s.ev = []; D = { falar: 99 }; const ev2 = s.passos(32).filter((e) => e.tipo === 'fala');
+      return { ev, total: ev2.length };""")
+    confere('evento de fala com o número da palavra', r['ev'] == [{'tipo': 'fala', 'palavra': 3}] and r['total'] == 0, r)
+    # 55) com tática ligada, o original automático não monta formação sozinho
+    r = S(pg, """s.nova({ semIA: false, comportamento: 'ofensivos', clonesIniciais: 6, originalAutomatico: true, ursoBot: 'parado', semente: 3 });
+      s.l.definirCerebro(() => ({})); const com = s.passos(1800).filter((e) => e.tipo === 'formacao').length;
+      s.nova({ semIA: false, comportamento: 'ofensivos', clonesIniciais: 6, originalAutomatico: true, ursoBot: 'parado', semente: 3 });
+      const sem = s.passos(1800).filter((e) => e.tipo === 'formacao').length; return { com, sem };""")
+    confere('com tática ligada o original automático não forma sozinho', r['com'] == 0 and r['sem'] >= 1, r)
     # 43) onomatopeia: o quadro do texto cresce com a palavra (antes era fixo em 512 e cortava)
     r = pg.evaluate("""() => { const c = document.createElement('canvas').getContext('2d'); c.font = '900 104px "Baloo 2", "Trebuchet MS", sans-serif';
       return { longa: c.measureText('SOCO LATERAL!').width, curta: c.measureText('PAF!').width }; }""")
