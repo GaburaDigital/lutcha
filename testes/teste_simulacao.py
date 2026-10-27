@@ -206,7 +206,7 @@ with servidor(), sync_playwright() as p:
     # 23) clones simples custam menos água
     r = S(pg, """s.nova({ clonesIniciais: 0 }); const a0 = s.l.aguaAtual; s.l.testeCriarClones(2, true); const a1 = s.l.aguaAtual; s.l.testeCriarClones(2, false);
       return [Math.round(a0 - a1), Math.round(a1 - s.l.aguaAtual)];""")
-    confere('clone simples custa menos água', r == [12, 30], r)
+    confere('clone simples custa menos água (4 e 8)', r == [8, 16], r)
 
     # ---------- equilíbrio e correções (C19) ----------
     # 24) três socos juntos no urso cansado: ele decola, voa e cai
@@ -361,6 +361,21 @@ with servidor(), sync_playwright() as p:
     # 42) roda das formações: precisa de clones perto (até 4 m)
     r = S(pg, formar(3) + """const p = s.l.formacoesPossiveis(); return { muralha: p.muralha, catapulta: p.catapulta, pode: s.l.testeFormar('muralha') };""")
     confere('formação só com clones suficientes perto', r['muralha']['tem'] == 3 and r['muralha']['precisa'] == 4 and not r['pode'], r)
+    # 44) teto de 30 clones
+    r = S(pg, """s.nova({ clonesIniciais: 26 }); s.l.agua = 100; s.l.testeCriarClones(8, true); return s.l.testeNumeros().length - 1;""")
+    confere('no máximo 30 clones', r == 30, r)
+    # 45) cérebro externo (tática do técnico): ordens por clone; a tática com erro não trava a luta
+    r = S(pg, """s.nova({ semIA: false, comportamento: 'parados', clonesIniciais: 3, ursoBot: 'parado' }); const cs = s.clone();
+      const o = s.l.numeroDoOriginal(); s.l.testeColocar(o, { x: -4, y: 0.47, z: -3 });
+      cs.forEach((c, i) => s.l.testeColocar(c, { x: -1 + i, y: 0.47, z: -1 }));
+      let vistas = 0, temOriginal = false;
+      s.l.definirCerebro((v) => { vistas++; temOriginal = !!v.original; return { ordens: { [cs[0]]: { atacar: 'soco' }, [cs[1]]: { ir: { x: 3, y: 0, z: -1 } }, [cs[2]]: { ir: { x: 99, y: 0, z: 0 } } } }; });
+      const ev = s.passos(600); const pos = (n) => s.l.foto().piranbenjas.find((p) => p.numero === n).pos;
+      const p1 = pos(cs[1]), p2 = pos(cs[2]);
+      s.l.definirCerebro(() => { throw new Error('tática com erro'); }); s.passos(30);
+      return { vistas, temOriginal, socos: ev.filter((e) => e.tipo === 'ursoGolpeado' && e.numero === cs[0]).length,
+        foi: Math.hypot(p1.x - 3, p1.z + 1) < 0.5, dentro: Math.hypot(p2.x, p2.z) < 5.5 };""")
+    confere('tática do técnico manda nos clones (com proteções)', r['vistas'] > 10 and r['temOriginal'] and r['socos'] >= 1 and r['foi'] and r['dentro'], r)
     # 43) onomatopeia: o quadro do texto cresce com a palavra (antes era fixo em 512 e cortava)
     r = pg.evaluate("""() => { const c = document.createElement('canvas').getContext('2d'); c.font = '900 104px "Baloo 2", "Trebuchet MS", sans-serif';
       return { longa: c.measureText('SOCO LATERAL!').width, curta: c.measureText('PAF!').width }; }""")

@@ -22,7 +22,7 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
-  AGUA, ALCANCE_FORMAR, ATAQUES_IMPACTO, ATORDOA_RASPAO, CATAPULTA, EQUILIBRIO, ESCALAR, FORMACOES, GOLPES, JANELA_COMBO, MARTELADA_PRESO,
+  AGUA, ALCANCE_FORMAR, MAX_CLONES, ATAQUES_IMPACTO, ATORDOA_RASPAO, CATAPULTA, EQUILIBRIO, ESCALAR, FORMACOES, GOLPES, JANELA_COMBO, MARTELADA_PRESO,
   MULT_QUALIDADE, PARTE_VIZINHOS, PESO, PIRANBENJA, RINGUE, TIPOS_FORMACAO, URSO, URSO_APANHANDO,
   classificarGolpe, empurraoNoUrso, fatorCombo, gerarBlocos, lancamento, maoMeioFechada, modsDaZona, qualidadeDoGolpe, saidaCatapulta,
   velocidadeDeDecolagem, zonaDoContato,
@@ -60,6 +60,22 @@ export interface ControleOriginal {
   /** Mira da catapulta: distância em metros (vem da inclinação da câmera). */
   mira?: number;
 }
+
+// ---------------- cérebro externo: as táticas do técnico (conversa "Programação por blocos") ----------------
+// A tática roda só no PC (nunca vai para o Quest, D-221/D-304). Ela recebe a visão abaixo a cada 0,25 s e devolve
+// ordens por clone; a Luta continua cuidando da física, das proteções (não sair do ringue) e do sigilo.
+// Sem ordem para um clone, vale a IA mínima de hoje (pensarClone).
+export interface VisaoTatica {
+  tempo: number; agua: number;
+  urso: { cabeca: V3; res: number; equilibrio: number; sentado: boolean; tonto: boolean; noAr: boolean };
+  original: { numero: number; pos: V3 } | null;
+  clones: { numero: number; pos: V3; estado: EstadoIA; simples: boolean; armadilha: boolean; emFormacao: boolean; distanciaAoUrso: number }[];
+  formacoes: FotoFormacao[];
+}
+/** Ordem para um clone: ir até um ponto, atacar o urso (chega perto e arma), recuar, parar ou ir para a catapulta. */
+export interface OrdemClone { ir?: V3; atacar?: AtaquePB; recuar?: boolean; parar?: boolean; catapulta?: boolean }
+export interface DecisaoTatica { ordens?: Record<number, OrdemClone>; formar?: TipoFormacao | null }
+export type Cerebro = (v: VisaoTatica) => DecisaoTatica;
 
 /** O que o clone está fazendo (aparece nas ajudas visuais do teste). Cabe em 4 bits na rede (até 16). */
 export const ESTADOS_IA = ['andando', 'parado', 'aproximando', 'rodeando', 'armando', 'atacando', 'recuando', 'atordoado', 'formacao', 'caido', 'projetil', 'escalando'] as const;
@@ -202,7 +218,7 @@ const JUNTAS: [Parte, Parte, V3][] = [
 const GRUPO_RAGDOLL = (0x0002 << 16) | 0xfffd; // é do grupo 2 e não bate no grupo 2
 const MAX_RAGDOLLS = 4;
 /** Clone simples custa menos água (D-075): proposta para o teste. */
-export const CUSTO_SIMPLES = 6; // C19: 8 → 6
+export const CUSTO_SIMPLES = 4; // C19: 8 → 6; C24: 6 → 4
 /** Grudados: no máximo 6 ao mesmo tempo; cada um tira 1 de resistência por segundo e deixa o urso 5% mais lento (D-083). */
 const MAX_GRUDADOS = 6;
 /** Sacudir: a parte mordida passando de 6,5 m/s por 0,1 s solta quem está grudado. */
@@ -253,6 +269,9 @@ export class Luta {
   private recargaMartelada: Record<Lado, number> = { esq: 0, dir: 0 };
   private ursoAcertos: number[] = [];
   private unidades: Unidade[] = [];
+  private cerebro: Cerebro | null = null;
+  private cerebroEm = 0;
+  private ordens = new Map<number, OrdemClone>();
   private proximaUnidade = 1;
   private formarEm = 0;              // original automático: quando pensa em montar formação
   /** Pata que a luta usa: para na superfície dos Piranbenjas (a do controle pode estar "dentro"). */
@@ -374,6 +393,7 @@ export class Luta {
   /** Cria clones em volta do original e muda o original de lugar entre eles (GDD 7: nunca revelar o original). */
   private espalharClones(quantos: number, gratis = false, simples = false): number {
     const custo = simples ? CUSTO_SIMPLES : AGUA.custoClone;
+    quantos = Math.min(quantos, MAX_CLONES - this.pbs.filter((p) => !p.original).length); // teto de 30 clones
     if (!gratis) quantos = Math.min(quantos, Math.floor(this.agua / custo));
     if (quantos <= 0) return 0;
     if (!gratis) this.agua -= quantos * custo;
@@ -477,6 +497,7 @@ export class Luta {
       this.controlarOriginal(dt);
       this.atualizarFormacoes(dt);
       for (const p of this.pbs) this.progredirAtaque(p);
+      if (!this.opcoes.semIA) this.pensarTatica();
       if (!this.opcoes.semIA) for (const p of this.pbs) if (!p.original || this.opcoes.originalAutomatico) this.pensarClone(p);
       for (const p of this.pbs) if (!this.opcoes.semIA || p.original) this.andar(p);
       this.golpesDasPatas();
@@ -602,6 +623,9 @@ export class Luta {
       if (!this.unidades.includes(c) || c.carregado || this.tempo < c.recargaAte) p.indoCatapulta = null;
       else { p.estado = 'andando'; p.alvo = { ...c.centro }; return; }
     }
+    // ordem da tática do técnico, se houver
+    const ordem = this.ordens.get(p.numero);
+    if (ordem && this.seguirOrdem(p, ordem, pos, d)) return;
     if (p.estado === 'aproximando' && d < 0.55 && this.tempo > p.ataqueEm) { this.armar(p); return; }
     if (p.armadilha) {
       // parada onde nasceu; quando o urso encosta quase, arma a mordida
@@ -659,6 +683,62 @@ export class Luta {
     if (p.ataqueEm < this.tempo - 6) p.ataqueEm = this.tempo + 2 + this.aleatorio() * 3;
     const ang = Math.atan2(pos.z - u.z, pos.x - u.x) + (this.aleatorio() < 0.5 ? 0.5 : -0.5);
     p.alvo = limitar(vec(u.x + Math.cos(ang) * 1.9, 0, u.z + Math.sin(ang) * 1.9));
+  }
+
+  /** Liga (ou desliga, com null) a tática do técnico. */
+  definirCerebro(c: Cerebro | null): void { this.cerebro = c; this.ordens.clear(); this.cerebroEm = 0; }
+
+  private visaoTatica(): VisaoTatica {
+    const o = this.pbs.find((p) => p.original), f = this.foto();
+    return {
+      tempo: this.tempo, agua: this.agua,
+      urso: { cabeca: { ...this.entrada.cabeca }, res: this.ursoRes, equilibrio: this.equilibrio, sentado: f.urso.sentado, tonto: f.urso.tonto, noAr: this.tempo < this.ursoNoArAte },
+      original: o ? { numero: o.numero, pos: this.posDe(o) } : null,
+      clones: this.pbs.filter((p) => !p.original).map((p) => { const pos = this.posDe(p); return { numero: p.numero, pos, estado: p.estado, simples: p.simples, armadilha: p.armadilha, emFormacao: p.naFormacao, distanciaAoUrso: this.distanciaAoUrso(pos) }; }),
+      formacoes: f.formacoes,
+    };
+  }
+
+  /** Pergunta à tática a cada 0,25 s. A resposta é conferida (nada vira código executado; só valores de uma lista fechada). */
+  private pensarTatica(): void {
+    if (!this.cerebro || this.tempo < this.cerebroEm) return;
+    this.cerebroEm = this.tempo + 0.25;
+    let d: DecisaoTatica;
+    try { d = this.cerebro(this.visaoTatica()) ?? {}; } catch { d = {}; } // tática com erro: os clones seguem a IA mínima
+    this.ordens.clear();
+    const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
+    for (const [k, o] of Object.entries(d.ordens ?? {})) {
+      if (!o || typeof o !== 'object') continue;
+      const ordem: OrdemClone = {};
+      if (o.ir && num(o.ir.x) && num(o.ir.z)) ordem.ir = vec(o.ir.x, 0, o.ir.z);
+      if (o.atacar && ATAQUES_PB.includes(o.atacar)) ordem.atacar = o.atacar;
+      if (o.recuar === true) ordem.recuar = true;
+      if (o.parar === true) ordem.parar = true;
+      if (o.catapulta === true) ordem.catapulta = true;
+      this.ordens.set(Number(k), ordem);
+    }
+    if (d.formar && TIPOS_FORMACAO.includes(d.formar)) this.formar(d.formar);
+  }
+
+  /** Cumpre a ordem com as proteções de sempre (alvos dentro do ringue; simples só dá tapa; o original não morde). */
+  private seguirOrdem(p: Piranbenja, o: OrdemClone, pos: V3, d: number): boolean {
+    const limitar = (a: V3) => { const r = Math.hypot(a.x, a.z), m = RINGUE.raio - 0.7; if (r > m) { a.x *= m / r; a.z *= m / r; } return a; };
+    const u = this.entrada.cabeca;
+    if (o.parar) { p.estado = 'parado'; p.alvo = pos; return true; }
+    if (o.recuar) { const fora = sub(pos, u), n = lenH(fora) || 1; p.estado = 'recuando'; p.alvo = limitar(vec(u.x + (fora.x / n) * 2.3, 0, u.z + (fora.z / n) * 2.3)); return true; }
+    if (o.catapulta) {
+      const cat = this.unidades.find((x) => x.tipo === 'catapulta' && x.montada && !x.carregado && this.tempo >= x.recargaAte);
+      if (cat && !p.simples) { p.indoCatapulta = cat; p.estado = 'andando'; p.alvo = { ...cat.centro }; return true; }
+    }
+    if (o.atacar) {
+      if (d < 0.55 && this.tempo > p.ataqueEm) {
+        let t = o.atacar; if (p.simples || p.armadilha) t = p.armadilha ? 'morder' : 'tapa'; if (p.original && t === 'morder') t = 'tapa';
+        this.armar(p, t); p.ataqueEm = this.tempo + 1; return true;
+      }
+      p.estado = 'aproximando'; p.alvo = limitar(this.alvoJuntoAoUrso(pos)); return true;
+    }
+    if (o.ir) { p.estado = 'andando'; p.alvo = limitar({ ...o.ir }); return true; }
+    return false;
   }
 
   private andar(p: Piranbenja): void {

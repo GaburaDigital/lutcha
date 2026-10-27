@@ -23,7 +23,9 @@ export const PIRANBENJA = { altura: 0.9, raio: 0.2, velocidade: 2.8, resOriginal
 export const URSO = { altura: 2.7, raioCorpo: 0.5, raioMao: 0.15 };
 export const PESO = { urso: 4, original: 1, clone: 0.8 };
 
-export const AGUA = { maximo: 100, recarga: 3, custoClone: 15, inicial: 100 }; // recarga 2 → 3 (C19)
+export const AGUA = { maximo: 100, recarga: 3, custoClone: 8, inicial: 100 }; // recarga 2 → 3 (C19); clone complexo 15 → 8 (C24)
+/** No máximo 30 clones ao mesmo tempo (D-076; o desempenho do Quest ainda será medido). */
+export const MAX_CLONES = 30;
 
 /** Combo de impacto: acertos no mesmo alvo dentro de 0,4 s. */
 export const JANELA_COMBO = 0.4;
