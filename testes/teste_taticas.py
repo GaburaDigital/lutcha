@@ -1,7 +1,7 @@
 """Testes das táticas do técnico (conversa "Programação por blocos e IA dos clones"), pelo modo laboratório:
-conferência do JSON (lista fechada, limite de 50 blocos), somar regras ligado e desligado, ação exclusiva (atacar)
+conferência do JSON (lista fechada, limite de 100 blocos), somar regras ligado e desligado, ação exclusiva (atacar)
 vencendo movimento, sinais, grupos que sobrevivem ao sorteio dos números, original no automático, obediência,
-formação pedida pela tática e as táticas prontas rodando sem erro. Termina com a tela do PC (painel e teclas)."""
+formação pedida pela tática e as táticas prontas rodando sem erro. Termina com a tela do PC: Quadro do técnico (Tab), Aplicar (Enter), mini-grade e câmera de técnico."""
 import sys
 from base import *
 
@@ -35,14 +35,14 @@ with servidor(), sync_playwright() as p:
       return { desconhecido: c(base([{ ...regra, fazer: [{ b: 'explodir' }] }])).ok,
         codigo: c(base([{ ...regra, fazer: ['alert(1)'] }])).ok, mira: c(base([{ ...regra, fazer: [{ b: 'atacar', ataque: 'soco', mirar: 'rabo' }] }])).ok,
         reporter: c({ versao: 2, nome: { pt: 'a', en: 'a' }, regras: [{ quando: { b: 'sempre' }, corpo: [{ b: 'se', cond: { b: 'compara', op: '<', a: { valor: 'senha' }, c: { n: 1 } }, entao: [] }] }] }).ok,
-        cabe: v2(20), demais: v2(21), fundoOk: fundo(8), fundoDemais: fundo(14),
+        cabe: v2(25), demais: v2(26), fundoOk: fundo(8), fundoDemais: fundo(14),
         faixa: c(base([{ ...regra, fazer: [{ b: 'rodear', m: 999, sentido: 1 }] }])).tatica.regras[0].corpo[0].corpo[0].m,
         formato1: c(base([regra])).tatica.versao,
         prontas: __lab.taticas.TATICAS_PRONTAS.map((t) => { const x = c(JSON.parse(JSON.stringify(t))); return x.ok ? x.blocos : x.erro; }) };""")
     confere('conferência recusa bloco desconhecido, código, mira e repórter inválidos', not r['desconhecido'] and not r['codigo'] and not r['mira'] and not r['reporter'], r)
-    confere('limite de 80 blocos e de encaixes', r['cabe'] and not r['demais'] and r['fundoOk'] and not r['fundoDemais'], r)
+    confere('limite de 100 blocos e de encaixes', r['cabe'] and not r['demais'] and r['fundoOk'] and not r['fundoDemais'], r)
     confere('valor fora da faixa é limitado; formato 1 vira formato 2', r['faixa'] == 5 and r['formato1'] == 2, r)
-    confere('táticas prontas passam na conferência (até 80 blocos)', all(isinstance(x, int) and x <= 80 for x in r['prontas']), r['prontas'])
+    confere('táticas prontas passam na conferência (até 100 blocos)', all(isinstance(x, int) and x <= 100 for x in r['prontas']), r['prontas'])
 
     # 2) somar regras: ligado soma os movimentos (diagonal); desligado vale só a primeira regra
     js_somar = """s.nova(); s.alinhar(); s.tec(0.5); const [c] = s.clone();
@@ -170,16 +170,41 @@ with servidor(), sync_playwright() as p:
       t.mudarQuantidade('beta', 1, ps); t.mudarQuantidade('beta', 1, ps); const dois = t.contarGrupos().beta; t.mudarQuantidade('beta', -1, ps); return { dois, um: t.contarGrupos().beta };""")
     confere('mini-grade: + e − mudam a quantidade do grupo', r['dois'] == 2 and r['um'] == 1, r)
 
-    # 10) tela do PC: painel do técnico, teclas 1–5, Tab e G
+    # 10) tela do PC: teclas, Quadro do técnico (Tab), Aplicar (Enter), mini-grade e câmera de técnico
+    pg.set_viewport_size({'width': 1280, 'height': 720})
     pg.goto(URL + '?modo=pcsolo&urso=parado&iniciais=4'); pg.wait_for_function('() => window.__tecnico', timeout=60000)
-    pg.keyboard.press('3'); pg.keyboard.press('Tab'); pg.keyboard.press('g'); pg.keyboard.press('o'); pg.wait_for_timeout(600)
-    r = pg.evaluate("""() => { const t = window.__tecnico; return { ativa: t.ativa, auto: t.automatico, autoLuta: !!window.__teste.luta.opcoes.originalAutomatico,
-      grupo: t.tecnico.grupoDosNovos, painel: document.querySelector('.tecnico')?.textContent ?? '' }; }""")
-    pg.screenshot(path=F + 'taticas_painel.png')
-    confere('teclas: 3 escolhe a tática, Tab liga o automático, G troca o grupo', r['ativa'] == 3 and r['auto'] and r['autoLuta'] and r['grupo'] == 'beta', r)
-    confere('painel mostra a tática e o grito do sinal', 'Derruba e bate' in r['painel'] and 'Pastel Dimensional' in r['painel'], r['painel'][:160])
+    pg.keyboard.press('3'); pg.wait_for_timeout(300)
+    pg.keyboard.press('Tab'); pg.wait_for_function("() => window.__tecnico.quadro && !window.__tecnico.quadro.el.hidden && document.querySelector('.quadro .blocklyBlockCanvas')", timeout=30000)
+    pg.keyboard.press('g'); pg.keyboard.press('o'); pg.wait_for_timeout(900)
+    r = pg.evaluate("""() => { const t = window.__tecnico, q = t.quadro; return { ativa: t.ativa, auto: t.automatico, autoLuta: !!window.__teste.luta.opcoes.originalAutomatico,
+      grupo: t.tecnico.grupoDosNovos, aba: q.estado().aba, blocos: q.estado().blocos, erro: q.estado().erro, emcampo: document.querySelector('.quadro .emcampo').textContent,
+      chapeus: document.querySelectorAll('.quadro .blocklyBlockCanvas > g').length, larguraJogo: document.querySelector('.jogo').getBoundingClientRect().width }; }""")
+    pg.screenshot(path=F + 'taticas_quadro.png')
+    confere('Tab abre o Quadro e liga o automático; 3 escolhe a tática; G troca o grupo', r['ativa'] == 3 and r['aba'] == 3 and r['auto'] and r['autoLuta'] and r['grupo'] == 'beta', r)
+    confere('Quadro mostra a tática em campo nos blocos (conferida, até 100)', 'Derruba e bate' in r['emcampo'] and 30 < r['blocos'] <= 100 and r['erro'] == '' and r['chapeus'] >= 5, r)
+    confere('a luta fica com dois terços da tela', abs(r['larguraJogo'] - 1280 * 2 / 3) < 3, r['larguraJogo'])
+    try: pg.wait_for_function("() => window.__tecnico.camTecnico.mistura > 0.99", timeout=8000)
+    except Exception: pass
+    cam = pg.evaluate("() => window.__tecnico.camTecnico.mistura")
+    confere('câmera de técnico sobe suave com o Quadro aberto', cam > 0.99, cam)
+    # carregar a pronta "Chute na borda" na aba 1 e aplicar com Enter: vai para o campo
+    pg.click('.quadro .aba[data-aba="1"]'); pg.select_option('.quadro .carregar', '4'); pg.wait_for_timeout(200)
+    pend = pg.evaluate("() => window.__tecnico.quadro.estado()")
+    pg.mouse.click(5, 5); pg.keyboard.press('Enter'); pg.wait_for_timeout(300)
+    r = pg.evaluate("() => ({ ativa: window.__tecnico.ativa, nome: window.__tecnico.tecnico.tatica?.nome.pt, est: window.__tecnico.quadro.estado(), msg: document.querySelector('.quadro .msg').textContent })")
+    confere('Enter aplica a aba: a tática nova entra em campo ao vivo', pend['alterado'] and r['ativa'] == 1 and r['nome'] == 'Chute na borda' and not r['est']['alterado'], [pend, r])
+    # mini-grade: + no gamma puxa um clone; − devolve
+    pg.click('.quadro .grupo button.mm[data-g="gamma"][data-d="1"]'); pg.click('.quadro .grupo button.mm[data-g="gamma"][data-d="1"]'); pg.wait_for_timeout(200)
+    dois = pg.evaluate("() => window.__tecnico.tecnico.contarGrupos().gamma")
+    pg.click('.quadro .grupo button.mm[data-g="gamma"][data-d="-1"]'); pg.wait_for_timeout(200)
+    um = pg.evaluate("() => window.__tecnico.tecnico.contarGrupos().gamma")
+    confere('mini-grade no jogo: + e − mudam a quantidade do gamma', dois == 2 and um == 1, [dois, um])
+    # Tab fecha: automático desliga, painel pequeno volta
+    pg.keyboard.press('Tab'); pg.wait_for_timeout(300)
+    r = pg.evaluate("() => ({ auto: window.__tecnico.automatico, quadro: window.__tecnico.quadro.el.hidden, painel: !document.querySelector('.tecnico').hidden, pausa: !(document.querySelector('#pausa')?.hidden ?? true) })")
+    confere('Tab fecha o Quadro, desliga o automático e não abre a pausa', not r['auto'] and r['quadro'] and r['painel'] and not r['pausa'], r)
 
-    reais = [e for e in erros if 'GPU stall' not in e and 'WebGL' not in e]
+    reais = [e for e in erros if 'GPU stall' not in e and 'WebGL' not in e and 'was deprecated in v12' not in e]  # aviso interno do próprio Blockly 12
     if reais: print('erros no console:', reais); erros_teste.append('console')
     b.close()
 

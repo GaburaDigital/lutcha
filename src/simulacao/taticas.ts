@@ -33,7 +33,7 @@ export type Grupo = typeof GRUPOS[number];
 /** Cores dos grupos (só no PC). */
 export const COR_GRUPO: Record<Grupo, string> = { alpha: '#4f9bff', beta: '#ff9a3d', gamma: '#5fd35f', sigma: '#b07cff' };
 /** Blocos por tática (D-305). Contam comandos, condições e repórteres; números digitados não contam. */
-export const MAX_BLOCOS = 80;
+export const MAX_BLOCOS = 100;      // C30: 100 para testar (as táticas prontas usam 44 a 63)
 export const MAX_FUNDO = 12;           // encaixes um dentro do outro
 export const PENSAR_A_CADA = 0.25;     // s (a Luta pergunta neste ritmo)
 export const REACAO = { min: 0.2, max: 1.2, simples: 1.3 }; // D-091; clone simples reage 30% mais devagar

@@ -1,4 +1,4 @@
-/* Painel do técnico (provisório, até o Quadro do técnico da rodada 2). */
+/* Painel pequeno do técnico (aparece com o Quadro fechado). */
 .tecnico { position: absolute; left: 12px; top: 64px; width: min(300px, 46vw); padding: 8px 10px; border-radius: 10px;
   background: rgba(12, 26, 36, .82); border-left: 3px solid #b07cff; color: #e8f3f2; font-size: .82rem; line-height: 1.45;
   display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
@@ -10,3 +10,41 @@
 .tecnico .sinais { display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .tecnico .grito { color: #ffe066; font-weight: 700; font-size: .95rem; }
 .tecnico small { opacity: .7; }
+
+/* Quadro do técnico (D-337): um terço da tela, à direita; a luta continua nos outros dois terços. */
+.jogo.com-quadro { width: 66.667%; }
+.quadro { position: fixed; top: 0; right: 0; bottom: 0; width: 33.333%; min-width: 360px; display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; background: #0c1a24; border-left: 2px solid #7b4fd6; color: #e8f3f2; font: 600 .8rem/1.35 Nunito, sans-serif; z-index: 20; box-sizing: border-box; }
+.quadro[hidden] { display: none; }
+.quadro header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.quadro header strong { font: 800 1rem "Baloo 2", Nunito, sans-serif; color: #b07cff; }
+.quadro header .emcampo { flex: 1; color: #8fd651; }
+.quadro header small { opacity: .65; }
+.quadro .abas { display: flex; gap: 4px; }
+.quadro .aba { flex: 1; min-width: 0; padding: 5px 4px; border-radius: 8px 8px 0 0; border: 1px solid #2a4a60; background: #12283a; color: #9fb8c2; font: inherit; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quadro .aba[aria-pressed="true"] { background: #183449; color: #e8f3f2; border-bottom-color: #183449; }
+.quadro .aba.campo { box-shadow: inset 0 3px 0 #8fd651; }
+.quadro .opcoes { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.quadro .opcoes select { font: inherit; background: #12283a; color: #e8f3f2; border: 1px solid #2a4a60; border-radius: 6px; padding: 2px 4px; }
+.quadro .opcoes label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+.quadro .blockly { flex: 1; min-height: 180px; border-radius: 8px; overflow: hidden; border: 1px solid #2a4a60; }
+.quadro .aplicar { display: flex; align-items: center; gap: 8px; }
+.quadro .aplicar .conta { font-weight: 800; } .quadro .aplicar .conta.passou { color: #ff7b6b; }
+.quadro .aplicar .msg { flex: 1; } .quadro .msg.erro { color: #ff7b6b; } .quadro .msg.rascunho { color: #ffe066; } .quadro .msg.ok { color: #8fd651; }
+.quadro .aplicar button { font: 800 .85rem Nunito, sans-serif; padding: 6px 12px; border-radius: 10px; border: 0; background: #8fd651; color: #0c1a24; cursor: pointer; }
+.quadro .grade { display: flex; gap: 8px; height: 31%; min-height: 150px; }
+.quadro .grade svg { height: 100%; aspect-ratio: 1; touch-action: none; cursor: crosshair; flex: none; }
+.quadro .grade .lado { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.quadro .grupo { display: flex; align-items: center; gap: 5px; padding: 2px 4px; border-radius: 6px; }
+.quadro .grupo.pincel { background: #183449; outline: 1px solid #2f5a70; }
+.quadro .grupo .cor { width: 10px; height: 10px; border-radius: 3px; }
+.quadro .grupo .nome { flex: 1; text-align: left; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 0; }
+.quadro .grupo b { min-width: 18px; text-align: right; }
+.quadro .grupo .mm { width: 22px; height: 22px; border-radius: 6px; border: 1px solid #2f5a70; background: #12283a; color: #e8f3f2; font: 800 .9rem Nunito, sans-serif; cursor: pointer; padding: 0; }
+.quadro .grade small { opacity: .65; font-size: .7rem; }
+.quadro kbd { font: inherit; font-size: .72rem; padding: 0 4px; border-radius: 4px; background: rgba(255, 255, 255, .12); }
+.quadro .sinais { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.quadro .sinais button { font: inherit; padding: 3px 7px; border-radius: 8px; border: 1px solid #2a4a60; background: #12283a; color: #ffe066; cursor: pointer; }
+.tecnico[hidden] { display: none; }
+.jogo.com-quadro .clique { display: none; } /* com o Quadro aberto, o mouse é do Quadro */
+.jogo.com-quadro .teclas { display: none; } /* original no automático: a faixa de teclas some */

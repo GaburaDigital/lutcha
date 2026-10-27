@@ -105,7 +105,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
   // só nesta tela: um anel aqua no chão marca o original (o jogador sabe quem ele é; o Quest nunca sabe)
   const marca = new THREE.Mesh(new THREE.RingGeometry(0.26, 0.34, 12), new THREE.MeshBasicMaterial({ color: '#4fd6d0', side: THREE.DoubleSide }));
   marca.rotation.x = -Math.PI / 2; cena.add(marca);
-  const tecnicoPC = ligarTecnico(luta, raiz, cena); // teclas 1–5, U I O P, Tab e G; painel do técnico
+  const tecnicoPC = ligarTecnico(luta, raiz, cena); // Tab Quadro do técnico, 1–4 táticas, U I O P sinais, G grupo
   // grito do sinal (D-330): além do painel do PC, vira evento "fala" da luta (só o número da palavra vai para o Quest)
   { const antes = tecnicoPC.tecnico.aoSinal; tecnicoPC.tecnico.aoSinal = (i) => { antes?.(i); luta.falar(PALAVRA_DO_SINAL[i] ?? i); }; }
 
@@ -177,6 +177,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
   }, { passive: true });
   render.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
   render.domElement.addEventListener('mousedown', (e) => {
+    if (tecnicoPC.aberto()) return; // Quadro do técnico aberto: o mouse é do Quadro
     if (!travado()) { if (!pausado) prender(); return; }
     if (e.button === 0) { luta.controle.atacar = 'tapa'; acender('tapa', true); }
     if (e.button === 2) { luta.controle.atacar = impacto; acender('soco', true); }
@@ -195,7 +196,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
   document.addEventListener('pointerlockchange', () => {
     clique.hidden = travado() || pausado;
     // Esc solta o mouse pelo navegador: no solo, isso abre a pausa (Alt só solta o mouse)
-    if (!travado() && solo && !soltouComAlt) abrirPausa();
+    if (!travado() && solo && !soltouComAlt && !tecnicoPC.aberto()) abrirPausa(); // abrir o Quadro solta o mouse sem pausar
     soltouComAlt = false;
   });
 
@@ -325,6 +326,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
     const dist = 3.4;
     camera.position.set(o.x - fx * dist * Math.cos(pitch), Math.max(0.3, o.y + 1.2 - Math.sin(pitch) * dist), o.z - fz * dist * Math.cos(pitch));
     camera.lookAt(o.x + fx * 0.5, o.y + 0.9, o.z + fz * 0.5); // mira um pouco acima: o urso (2,7 m) cabe na tela
+    tecnicoPC.camera(camera, o, { x: o.x + fx * 0.5, y: o.y + 0.9, z: o.z + fz * 0.5 }, dt); // câmera de técnico com o Quadro aberto (D-308)
     onos.atualizar(dt);
     barAgua.style.width = `${Math.round(luta.aguaAtual)}%`;
     barUrso.style.width = `${foto.urso.res}%`;
