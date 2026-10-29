@@ -306,7 +306,7 @@ export async function iniciarPC(raiz: HTMLElement, tipoCanal: 'trystero' | 'loca
     if (canal && ateFoto <= 0 && canal.conectado()) { ateFoto = 1 / 30; canal.enviarRapido(codificarFoto(luta.foto())); }
     const foto = luta.foto(), orig = luta.numeroDoOriginal();
     pbs.desenhar(foto.piranbenjas, { destaque: orig, marca, olharPara: luta.entradaUrso.cabeca, ajudas: config.ajudas, giroDe: (n) => (n === orig ? yaw : null) });
-    urso.desenhar(luta.esqueletoUrso, luta.entradaUrso.giro ?? 0);
+    urso.desenhar(luta.esqueletoUrso, luta.entradaUrso.giro ?? 0, performance.now() / 1000, luta.bonecoUrso()); // C32: decolagem forte = boneco solto
     urso.mostrarBarra(foto.urso.res, foto.urso.grudados, config.ajudas, foto.urso.equilibrio);
     formacoes.desenhar(foto.formacoes);
     // aviso do Espaço só quando dá para usar; na catapulta, o arco mostra para onde vai

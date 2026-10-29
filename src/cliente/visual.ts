@@ -217,6 +217,44 @@ export class Piranbenjas {
   }
 }
 
+/** Voo do urso como boneco solto (C32): há quanto tempo voa, para onde e se já se recompôs (−1 = não). */
+export interface TomboUrso { segundos: number; dir: V3; recompostoHa: number }
+
+/** Boneco solto do urso, só no desenho do PC: o corpo inteiro gira de costas na direção do voo e braços e pernas
+ *  balançam; ao se recompor, volta a ficar de pé em 0,3 s. A física continua usando o esqueleto de pé. */
+function tombarUrso(e: EsqueletoUrso, t: TomboUrso): { esq: EsqueletoUrso; q: THREE.Quaternion } {
+  const GIRO = 7; // rad/s (uma volta em ~0,9 s)
+  let ang = GIRO * t.segundos;
+  if (t.recompostoHa >= 0) {
+    ang = Math.atan2(Math.sin(ang), Math.cos(ang)); // volta pelo caminho mais curto
+    ang *= 1 - Math.min(1, t.recompostoHa / 0.3);
+  }
+  const balanco = t.recompostoHa >= 0 ? Math.max(0, 1 - t.recompostoHa / 0.3) : 1;
+  const eixo = new THREE.Vector3(t.dir.z, 0, -t.dir.x).normalize(); // cabeça vai para o lado do voo (cai de costas)
+  const q = new THREE.Quaternion().setFromAxisAngle(eixo.lengthSq() > 0 ? eixo : new THREE.Vector3(1, 0, 0), ang);
+  const tr = e.segs.find((x) => x.nome === 'tronco')!;
+  const centro = new THREE.Vector3((tr.a.x + tr.b.x) / 2, (tr.a.y + tr.b.y) / 2, (tr.a.z + tr.b.z) / 2);
+  const ts = t.segundos;
+  // braços e pernas balançando (moles), antes de girar o corpo
+  const mexer = (p: V3, nome: string): V3 => {
+    if (!balanco) return p;
+    const f = nome.startsWith('pata') || nome.startsWith('antebraco') ? 0.45 : nome.startsWith('perna') ? 0.25 : 0;
+    const s = nome.endsWith('E') ? 1 : -1;
+    return { x: p.x + Math.sin(ts * 13 + s) * f * balanco, y: p.y + Math.cos(ts * 11 + s * 2) * f * balanco, z: p.z + Math.sin(ts * 9 - s) * f * 0.6 * balanco };
+  };
+  const girar = (p: V3): V3 => { const w = new THREE.Vector3(p.x, p.y, p.z).sub(centro).applyQuaternion(q).add(centro); return { x: w.x, y: w.y, z: w.z }; };
+  const segs = e.segs.map((sg) => ({ ...sg, a: girar(sg.nome === 'pataE' || sg.nome === 'pataD' || sg.nome.startsWith('antebraco') ? mexer(sg.a, sg.nome) : sg.a), b: girar(sg.nome === 'tronco' || sg.nome === 'cabeca' || sg.nome.startsWith('braco') ? sg.b : mexer(sg.b, sg.nome)) }));
+  // o cotovelo é o fim do braço e o começo do antebraço: os dois precisam bater
+  for (const l of ['E', 'D'] as const) {
+    const br = segs.find((x) => x.nome === 'braco' + l)!, ab = segs.find((x) => x.nome === 'antebraco' + l)!, pa = segs.find((x) => x.nome === 'pata' + l)!;
+    ab.a = br.b; pa.a = ab.b; pa.b = ab.b;
+  }
+  const pega = (n: SegUrso) => segs.find((x) => x.nome === n)!;
+  const fr = new THREE.Vector3(e.frente.x, e.frente.y, e.frente.z).applyQuaternion(q);
+  return { q, esq: { ...e, segs, frente: { x: fr.x, y: fr.y, z: fr.z },
+    pata: { esq: pega('pataE').a, dir: pega('pataD').a }, cotovelo: { esq: pega('antebracoE').a, dir: pega('antebracoD').a } } };
+}
+
 /** UrsoBura visto de fora (no PC): corpo inteiro desenhado em cima do mesmo esqueleto que a luta usa
  *  (corpoUrso.ts), então o que se vê é exatamente onde os Piranbenjas acertam e grudam. Visual de teste, mais
  *  perto do model sheet (marrom, barriga clara, orelhas redondas, óculos ciano), sem pretender ser a arte final. */
@@ -271,14 +309,18 @@ export class UrsoDeFora {
     juntas[0].position.copy(A); juntas[1].position.copy(B); juntas[0].scale.setScalar(r); juntas[1].scale.setScalar(r);
   }
 
-  desenhar(esq: EsqueletoUrso, giro: number, tempo = performance.now() / 1000): void {
+  desenhar(esq: EsqueletoUrso, giro: number, tempo = performance.now() / 1000, tombo: TomboUrso | null = null): void {
+    let qTombo: THREE.Quaternion | null = null;
+    if (tombo) ({ esq, q: qTombo } = tombarUrso(esq, tombo));
     for (const mb of this.membros) { const s = esq.segs.find((x) => x.nome === mb.seg)!; this.membro(mb.cil, mb.juntas, s.a, s.b, s.r); }
     const cab = esq.segs.find((x) => x.nome === 'cabeca')!;
     this.cabeca.position.set(cab.a.x, cab.a.y, cab.a.z); this.cabeca.rotation.set(0, giro, 0);
+    if (qTombo) this.cabeca.quaternion.premultiply(qTombo);
     // barriga clara na frente do tronco
     const tr = esq.segs.find((x) => x.nome === 'tronco')!, f = esq.frente;
     this.barriga.position.set((tr.a.x + tr.b.x) / 2 + f.x * 0.3, (tr.a.y + tr.b.y) / 2 + 0.05, (tr.a.z + tr.b.z) / 2 + f.z * 0.3);
     this.barriga.scale.set(0.34, 0.45, 0.22); this.barriga.rotation.set(0, giro, 0);
+    if (qTombo) this.barriga.quaternion.premultiply(qTombo);
     for (const l of ['esq', 'dir'] as const) {
       const p = esq.pata[l], c = esq.cotovelo[l], g = this.patas[l];
       g.position.set(p.x, p.y, p.z);

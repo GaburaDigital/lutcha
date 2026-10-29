@@ -88,15 +88,16 @@ export type NomeGolpe = 'soco' | 'socoLateral' | 'gancho' | 'martelada' | 'arran
  *  area: quanto a área do golpe passa da pata (m); vizinhos: distância (m) em que outros clones levam 60%;
  *  empurrao: fator do lançamento na horizontal; subida: quanto vai para cima; atordoa: segundos parado;
  *  giro: 'rolar' de lado, 'mortal' para trás ou nada. */
-export const GOLPES: Record<NomeGolpe, { tipo: TipoGolpe; area: number; vizinhos: number; empurrao: number; subida: number; atordoa: number; giro: 'rolar' | 'mortal' | null }> = {
-  soco:        { tipo: 'impacto', area: 0.20, vizinhos: 0.55, empurrao: 1.0,  subida: 0.30, atordoa: 1.5, giro: null },
-  socoLateral: { tipo: 'impacto', area: 0.20, vizinhos: 0.55, empurrao: 0.9,  subida: 0.12, atordoa: 1.5, giro: 'rolar' },
-  gancho:      { tipo: 'impacto', area: 0.18, vizinhos: 0.45, empurrao: 0.35, subida: 1.6,  atordoa: 2.0, giro: 'mortal' },
-  martelada:   { tipo: 'impacto', area: 0.18, vizinhos: 0,    empurrao: 0.05, subida: 0,    atordoa: 2.5, giro: null },
-  arranhao:    { tipo: 'dano',    area: 0.32, vizinhos: 0.60, empurrao: 0.30, subida: 0.10, atordoa: 0.7, giro: null },
-  estocada:    { tipo: 'dano',    area: 0.10, vizinhos: 0.35, empurrao: 0.15, subida: 0.05, atordoa: 2.5, giro: null },
+export const GOLPES: Record<NomeGolpe, { tipo: TipoGolpe; area: number; vizinhos: number; tabela: number; dano: number; empurrao: number; subida: number; atordoa: number; giro: 'rolar' | 'mortal' | null }> = {
+  soco:        { tipo: 'impacto', area: 0.20, vizinhos: 0.55, tabela: 0.6, dano: 4,  empurrao: 1.0,  subida: 0.30, atordoa: 1.5, giro: null },
+  socoLateral: { tipo: 'impacto', area: 0.20, vizinhos: 0.55, tabela: 0.6, dano: 4,  empurrao: 0.9,  subida: 0.12, atordoa: 1.5, giro: 'rolar' },
+  gancho:      { tipo: 'impacto', area: 0.18, vizinhos: 0.45, tabela: 0.6, dano: 4,  empurrao: 0.35, subida: 1.6,  atordoa: 2.0, giro: 'mortal' },
+  martelada:   { tipo: 'impacto', area: 0.18, vizinhos: 0,    tabela: 0.6, dano: 4,  empurrao: 0.05, subida: 0,    atordoa: 2.5, giro: null },
+  // C32: o arranhão eliminava clones fácil demais: dano 12 → 8 e de tabela 60% → 30%
+  arranhao:    { tipo: 'dano',    area: 0.32, vizinhos: 0.60, tabela: 0.3, dano: 8,  empurrao: 0.30, subida: 0.10, atordoa: 0.7, giro: null },
+  estocada:    { tipo: 'dano',    area: 0.10, vizinhos: 0.35, tabela: 0.6, dano: 12, empurrao: 0.15, subida: 0.05, atordoa: 2.5, giro: null },
 };
-/** Vizinhos de quem levou o golpe recebem esta parte da força (C15: 60%). */
+/** Vizinhos de quem levou o golpe recebem esta parte da força (C15: 60%; o arranhão usa a própria, GOLPES.tabela). */
 export const PARTE_VIZINHOS = 0.6;
 /** Equilíbrio aprovado para testar (C19). */
 export const EQUILIBRIO = {
@@ -106,6 +107,8 @@ export const EQUILIBRIO = {
   danoTapa: 4, danoMordida: 5, grudadoPorSegundo: 2,
   impactoSoco: 4.5,             // empurrão do soco no urso: ~1,1 m/s inteiro, ~2,7 m/s com resistência 30
   decolarUrso: 4.0,             // m/s: acima disso o urso decola (voa em arco)
+  percursoMinimoGolpe: 0.25,    // m que a pata precisa andar (em relação ao corpo) em até 0,25 s para ser golpe (C32)
+  decolagemForte: 0.8,          // m/s acima do limite: o urso voa como boneco solto (visto no PC) e pode se recompor
   armar: 0.75,                  // s de aviso antes de atacar (original e clones)
   esperaSalvaVidas: 8,          // s entre dois "clones salva-vidas"
 };
@@ -120,8 +123,15 @@ export function empurraoNoUrso(res01: number): number {
 /** Decolagem proporcional: perto do limite é um pulinho (~50 cm); quanto mais passa, maior o arco. */
 export function velocidadeDeDecolagem(L: number, dirX: number, dirZ: number, subida = 0): V3 {
   const sobra = Math.max(0, L - EQUILIBRIO.decolarUrso);
-  const vy = Math.min(7.5, 3.1 + 0.8 * sobra + subida), h = (1.5 + 1.0 * sobra) * (1 - Math.min(0.7, subida * 0.25));
+  // C32: sobe bem mais (pulinho ~1 m, arco grande ~2,5 m) e vai para trás a mesma distância de antes
+  const vyAntes = Math.min(7.5, 3.1 + 0.8 * sobra + subida), hAntes = (1.5 + 1.0 * sobra) * (1 - Math.min(0.7, subida * 0.25));
+  const vy = Math.min(9.5, 4.4 + 1.0 * sobra + subida * 1.2), h = hAntes * (vyAntes / vy);
   return { x: dirX * h, y: vy, z: dirZ * h };
+}
+/** Pulinho do urso nos empurrões que não decolam (C32): altura ~10 cm por m/s de empurrão, até 45 cm. */
+export function subidaDoEmpurrao(L: number): number {
+  const h = Math.min(0.45, Math.max(0, 0.1 * L));
+  return h < 0.03 ? 0 : Math.sqrt(2 * 9.81 * h);
 }
 /** O que cada parte do urso faz quando leva impacto: perna enche a barra de equilíbrio (cai sentado),
  *  barriga empurra, cabeça deixa tonto 1 s, braço e pata empurram menos (é quase uma defesa). */

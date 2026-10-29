@@ -36,3 +36,9 @@ O urso continuava forte demais, então a luta mudou de novo. Quanto mais cansado
 
 ![Teste do Piranbenja: a roda das formações e a mira da catapulta](docs/diario/2026-10-26_formacoes.png)
 
+
+## 29/10/2026 — O urso cai de verdade
+
+Jogando mais, apareceram golpes que não deveriam existir: só de andar com a pata parada encostada num clone, ele levava uma estocada. Agora a pata só bate quando faz um movimento de verdade, e cada golpe conta uma vez para cada clone. O arranhão ficou mais fraco. Contra a catapulta, o urso tem uma guarda (punho fechado e para cima) que faz o Piranbenja só cair no chão, e só um soco de verdade rebate quem vem voando. Do outro lado, os golpes no urso agora levantam o corpo dele um pouquinho, e as decolagens vão bem mais alto: num golpe forte, o urso sai rodando como um boneco solto, a não ser que quem está no óculos abra os braços e desça as patas para cair de pé. E quando o urso sai do ringue, ele cai no vazio, igual ao Piranbenja.
+
+![O UrsoBura rodando no ar depois de um chute forte, visto pelo Piranbenja](docs/diario/2026-10-29_urso_boneco.png)

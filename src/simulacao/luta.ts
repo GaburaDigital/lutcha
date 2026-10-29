@@ -23,9 +23,9 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
   AGUA, ALCANCE_FORMAR, DISTRACOES, MAX_CLONES, MIRAS, ROLAR, TOTAL_PALAVRAS, ATAQUES_IMPACTO, ATORDOA_RASPAO, CATAPULTA, EQUILIBRIO, ESCALAR, FORMACOES, GOLPES, JANELA_COMBO, MARTELADA_PRESO,
-  MULT_QUALIDADE, PARTE_VIZINHOS, PESO, PIRANBENJA, RINGUE, TIPOS_FORMACAO, URSO, URSO_APANHANDO,
+  MULT_QUALIDADE, PESO, PIRANBENJA, RINGUE, TIPOS_FORMACAO, URSO, URSO_APANHANDO,
   classificarGolpe, empurraoNoUrso, fatorCombo, gerarBlocos, lancamento, maoMeioFechada, modsDaZona, qualidadeDoGolpe, saidaCatapulta,
-  velocidadeDeDecolagem, zonaDoContato,
+  velocidadeDeDecolagem, subidaDoEmpurrao, zonaDoContato,
   type AtaqueImpacto, type Distracao, type Mira, type NomeGolpe, type Qualidade, type TipoFormacao, type TipoGolpe, type V3, type Zona,
 } from './regras';
 import {
@@ -134,8 +134,8 @@ export type Evento =
   | { tipo: 'derreteu'; numero: number }
   | { tipo: 'clones'; quantos: number }
   | { tipo: 'cameraLenta'; segundos: number; escala: number }
-  | { tipo: 'ursoGolpeado'; golpe: TipoGolpe; combo: number; empurrao: { x: number; z: number }; ataque?: AtaquePB; parte?: SegUrso; ponto?: V3; numero?: number; projetil?: boolean; bloqueio?: boolean }
-  | { tipo: 'ursoDecolou'; vel: V3 }
+  | { tipo: 'ursoGolpeado'; golpe: TipoGolpe; combo: number; empurrao: { x: number; z: number }; ataque?: AtaquePB; parte?: SegUrso; ponto?: V3; numero?: number; projetil?: boolean; bloqueio?: boolean; subida?: number }
+  | { tipo: 'ursoDecolou'; vel: V3; forte?: boolean }
   | { tipo: 'ursoCaiu'; segundos: number }
   | { tipo: 'ursoTonto'; segundos: number }
   /** Correção de posição (m): o urso esbarrou numa formação e não atravessa. */
@@ -144,6 +144,9 @@ export type Evento =
   | { tipo: 'formacaoDesfeita'; id: number; strike: boolean }
   | { tipo: 'catapulta'; numero: number; vel: V3 }
   | { tipo: 'rebatida'; mao: Lado; numero: number }
+  | { tipo: 'defesa'; mao: Lado; numero: number }
+  | { tipo: 'ursoRecompos' }
+  | { tipo: 'ursoCaindo' }
   | { tipo: 'correnteEnrolou'; parte: SegUrso }
   /** Grito do sinal: só o número da palavra-código (o Quest mostra/toca a palavra; não sabe o que ela significa). */
   | { tipo: 'fala'; palavra: number }
@@ -288,6 +291,14 @@ export class Luta {
   // é conferido inteiro, para um golpe rápido não atravessar o Piranbenja sem encostar
   private ultimaAmostra: Record<Lado, { pos: V3; t: number } | null> = { esq: null, dir: null };
   private caminho: Record<Lado, { de: V3; ate: V3 } | null> = { esq: null, dir: null };
+  /** C32: posição de cada pata em relação à cabeça nos últimos ~0,3 s. A velocidade do golpe sai daqui, então andar,
+   *  ser empurrado, voar e o giro de 30° do analógico não viram golpe; e é medida numa janela de ~45 ms, para
+   *  amostras da rede que chegam juntas não parecerem um movimento rápido. */
+  private historico: Record<Lado, { t: number; rel: V3 }[]> = { esq: [], dir: [] };
+  private percurso: Record<Lado, number> = { esq: 0, dir: 0 };
+  private ultimoGiro: number | null = null;
+  /** C32: um golpe = um acerto por Piranbenja. O golpe começa quando a pata passa do limite e acaba quando ela desacelera. */
+  private golpeAtivo: Record<Lado, Set<string> | null> = { esq: null, dir: null };
   private gripAntes: Record<Lado, boolean> = { esq: false, dir: false };
   private segurando: Record<Lado, Piranbenja | null> = { esq: null, dir: null };
   private recargaGolpe = new Map<string, number>();
@@ -306,6 +317,11 @@ export class Luta {
   private ursoNoArAte = 0;
   /** Voo atual do urso (para o malabarismo somar ao voo em vez de trocar por um menor). */
   private vooUrso: { v: V3; t0: number } | null = null;
+  /** C32: decolagem forte (ou caindo no vazio): no PC o urso voa como boneco solto até cair ou se recompor no ar
+   *  (braços abertos e depois as duas patas abaixo da cintura). */
+  private ursoBoneco: { desde: number; dir: V3; fase: 0 | 1; recomposto: number; botRecompoe: number } | null = null;
+  /** C32: o urso saiu do ringue e está caindo no vazio desde esta hora (0 = não). */
+  private ursoCaindoDesde = 0;
   /** Barra de equilíbrio (impactos na perna); cheia, o urso cai sentado. */
   equilibrio = 0;
   private equilibrioUltimo = 0;
@@ -346,14 +362,39 @@ export class Luta {
   // ---------------- entradas ----------------
   /** Posição da cabeça e das patas do urso no mundo (do Quest, a cada quadro ou pela rede). */
   definirUrso(e: EntradaUrso, agora = this.relogioReal): void {
+    const cab = e.cabeca, giro = e.giro ?? 0;
+    // giro brusco (o giro de 30° do analógico): gira o histórico junto, para o giro não virar golpe
+    if (this.ultimoGiro !== null) {
+      let dg = giro - this.ultimoGiro; while (dg > Math.PI) dg -= Math.PI * 2; while (dg < -Math.PI) dg += Math.PI * 2;
+      if (Math.abs(dg) > 0.25) {
+        const c = Math.cos(dg), sn = Math.sin(dg);
+        for (const l of ['esq', 'dir'] as const) for (const h of this.historico[l]) h.rel = vec(h.rel.x * c + h.rel.z * sn, h.rel.y, -h.rel.x * sn + h.rel.z * c);
+      }
+    }
+    this.ultimoGiro = giro;
     for (const l of ['esq', 'dir'] as const) {
       const p = e.maos[l].pos, u = this.ultimaAmostra[l];
-      if (u && Math.hypot(p.x - u.pos.x, p.y - u.pos.y, p.z - u.pos.z) < 1e-6) continue;
-      if (u) {
-        const dt = Math.max(1 / 90, agora - u.t);
-        const v = vec((p.x - u.pos.x) / dt, (p.y - u.pos.y) / dt, (p.z - u.pos.z) / dt), n = len(v);
+      const h = this.historico[l];
+      // a mesma amostra repetida não conta de novo; pata parada ainda entra no histórico de vez em quando,
+      // para o começo de um golpe não ser dividido por um tempo longo
+      if (u && Math.hypot(p.x - u.pos.x, p.y - u.pos.y, p.z - u.pos.z) < 1e-6 && (!h.length || agora - h[h.length - 1].t < 0.03)) continue;
+      const rel = vec(p.x - cab.x, p.y - cab.y, p.z - cab.z);
+      h.push({ t: agora, rel });
+      while (h.length > 2 && agora - h[1].t >= 0.3) h.shift();
+      // velocidade: da amostra mais nova que tenha pelo menos 45 ms até agora
+      let ref = h[0];
+      for (let i = h.length - 2; i >= 0; i--) if (agora - h[i].t >= 0.045) { ref = h[i]; break; }
+      const dt = Math.max(1 / 90, agora - ref.t);
+      if (ref === h[h.length - 1]) this.velMao[l] = vec(0, 0, 0);
+      else {
+        const vv = vec((rel.x - ref.rel.x) / dt, (rel.y - ref.rel.y) / dt, (rel.z - ref.rel.z) / dt), n = len(vv);
         // conferência: nenhuma pata real passa de ~20 m/s (mão humana ~10 m/s × escala do urso); acima disso é salto da rede
-        this.velMao[l] = n > 20 ? vec((v.x / n) * 20, (v.y / n) * 20, (v.z / n) * 20) : v;
+        this.velMao[l] = n > 20 ? vec((vv.x / n) * 20, (vv.y / n) * 20, (vv.z / n) * 20) : vv;
+      }
+      // quanto a pata andou (em relação ao corpo) nos últimos 0,25 s: golpe precisa de um movimento decidido
+      const antiga = h.find((x) => agora - x.t <= 0.25) ?? h[h.length - 1];
+      this.percurso[l] = Math.hypot(rel.x - antiga.rel.x, rel.y - antiga.rel.y, rel.z - antiga.rel.z);
+      if (u) {
         // várias amostras antes do próximo passo: o caminho vai do começo da primeira ao fim da última
         const cam = this.caminho[l];
         this.caminho[l] = cam ? { de: cam.de, ate: { ...p } } : { de: { ...u.pos }, ate: { ...p } };
@@ -389,7 +430,8 @@ export class Luta {
     for (const p of this.pbs) { this.apagarRagdoll(p); this.mundo.removeRigidBody(p.corpo); }
     this.pbs = [];
     for (const l of ['esq', 'dir'] as const) { this.segurando[l] = null; this.pataEfetiva[l] = null; }
-    this.bot?.reiniciar(); this.ursoNoArAte = 0; this.salvaVidasAte = 0;
+    this.bot?.reiniciar(); this.ursoNoArAte = 0; this.salvaVidasAte = 0; this.ursoBoneco = null; this.ursoCaindoDesde = 0;
+    this.golpeAtivo = { esq: null, dir: null };
     this.equilibrio = 0; this.ursoSentadoAte = 0; this.ursoTontoAte = 0; this.formarEm = this.tempo + 6; this.vooUrso = null;
     this.agua = AGUA.inicial; this.ursoRes = 100; this.ursoAura = 0; this.rodada = 'luta';
     const f = this.opcoes.formacao ?? 'solto';
@@ -527,6 +569,7 @@ export class Luta {
       if (!this.opcoes.semIA) this.pensarTatica();
       if (!this.opcoes.semIA) for (const p of this.pbs) if (!p.original || this.opcoes.originalAutomatico) this.pensarClone(p);
       for (const p of this.pbs) if (!this.opcoes.semIA || p.original) this.andar(p);
+      this.vooDoUrso();
       this.golpesDasPatas();
       this.agarrarESoltar();
       this.boliche();
@@ -570,7 +613,7 @@ export class Luta {
     for (const l of ['esq', 'dir'] as const) {
       // sem amostra nova há mais de 0,1 s: a pata parou
       const u = this.ultimaAmostra[l];
-      if (u && relogio - u.t > 0.1) this.velMao[l] = vec(0, 0, 0);
+      if (u && relogio - u.t > 0.1) { this.velMao[l] = vec(0, 0, 0); this.percurso[l] = 0; }
     }
   }
 
@@ -673,7 +716,7 @@ export class Luta {
     if (!p.simples && comp !== 'parados' && comp !== 'aleatorio') {
       for (const l of ['esq', 'dir'] as const) {
         const m = this.pataNaLuta(l), fora = vec(pos.x - m.x, 0, pos.z - m.z);
-        if (len(this.velMao[l]) > EQUILIBRIO.velocidadeMinimaGolpe && lenH(fora) < 1.2 && this.aleatorio() < 0.3 && this.rolar(p, fora)) return;
+        if (len(this.velMao[l]) > EQUILIBRIO.velocidadeMinimaGolpe && this.percurso[l] >= EQUILIBRIO.percursoMinimoGolpe && lenH(fora) < 1.2 && this.aleatorio() < 0.3 && this.rolar(p, fora)) return;
       }
     }
     // clone complexo usa a catapulta sozinho (C21)
@@ -856,9 +899,13 @@ export class Luta {
     for (const l of ['esq', 'dir'] as const) {
       const v = this.velMao[l], vel = len(v);
       const cam = this.caminho[l]; this.caminho[l] = null;
-      if (vel < EQUILIBRIO.velocidadeMinimaGolpe || this.segurando[l] || this.tempo < this.ursoNoArAte) continue;
+      // o golpe acaba quando a pata desacelera (um vai e volta são dois golpes)
+      if (vel < EQUILIBRIO.velocidadeMinimaGolpe * 0.6) this.golpeAtivo[l] = null;
+      // pata parada, encostando ou só acompanhando o corpo não golpeia: precisa de velocidade e de um movimento decidido (C32)
+      if (vel < EQUILIBRIO.velocidadeMinimaGolpe || this.percurso[l] < EQUILIBRIO.percursoMinimoGolpe || this.segurando[l] || this.tempo < this.ursoNoArAte) continue;
       // mão meio fechada (indo agarrar) não golpeia (C22)
       if (maoMeioFechada(this.entrada.maos[l].gatilho, this.entrada.maos[l].grip)) continue;
+      const golpe = this.golpeAtivo[l] ?? (this.golpeAtivo[l] = new Set<string>());
       const fraco = this.tempo < this.ursoSentadoAte ? URSO_APANHANDO.forcaSentado : 1; // sentado no chão, as patas batem mais fraco
       // pontos do caminho da pata desde a última amostra (ou só a posição atual)
       const pontos: V3[] = [];
@@ -882,7 +929,9 @@ export class Luta {
         }
         if (melhor) diretos.push({ p, ...melhor });
       }
-      diretos = diretos.filter((x) => (this.recargaGolpe.get(l + x.p.numero) ?? -1) <= this.tempo).sort((a, b) => a.d - b.d);
+      diretos = diretos.filter((x) => !golpe.has('p' + x.p.numero)).sort((a, b) => a.d - b.d);
+      // projétil da catapulta: só um soco de verdade, indo contra ele, rebate (C32); outro golpe passa e ele acerta o urso
+      diretos = diretos.filter((x) => x.p.projetilAte <= this.tempo || this.rebateValido(x.p, v, nome, punho));
       if (!diretos.length) continue;
       if (nome === 'martelada') {
         // a martelada pega um só (C15), e a mesma pata só martela de novo depois de 0,6 s
@@ -900,29 +949,45 @@ export class Luta {
         // passou longe do meio do corpo (só a beirada da área pegou): é raspão
         const longe = desvio > PIRANBENJA.raio + raioMao * 0.6 + G.area * 0.5;
         const qualidade = longe ? 'raspao' : qualidadeDoGolpe(v, vec(c.x - x.ponto.x, 0, c.z - x.ponto.z));
-        this.recargaGolpe.set(l + x.p.numero, this.tempo + 0.35);
-        this.aplicarGolpe(x.p, l, v, nome, zona, qualidade, fraco, false);
+        golpe.add('p' + x.p.numero);
+        const veio = x.p.projetilAte > this.tempo ? this.velDe(x.p) : null;
+        this.aplicarGolpe(x.p, l, v, nome, zona, qualidade, fraco, false, golpe);
+        if (veio && this.vivo(x.p)) {
+          // rebatida: volta na direção oposta à que veio, um pouco mais forte, e para cima
+          const vh = Math.hypot(veio.x, veio.z) || 1, rap = Math.max(5, vh * 1.15);
+          this.definirVel(x.p, vec((-veio.x / vh) * rap, 3, (-veio.z / vh) * rap));
+        }
       }
       // quem está colado em quem levou o golpe leva 60% (ficar junto é perigoso)
       if (G.vizinhos <= 0) continue;
       for (const q of [...this.pbs]) {
-        if (!this.vivo(q) || atingidos.has(q) || q.agarradoPor || (this.recargaGolpe.get(l + q.numero) ?? -1) > this.tempo) continue;
+        if (!this.vivo(q) || atingidos.has(q) || q.agarradoPor || golpe.has('p' + q.numero) || q.projetilAte > this.tempo) continue;
         const pq = this.posDe(q);
         const perto = diretos.some((x) => { if (!this.vivo(x.p)) return false; const px = this.posDe(x.p); return lenH(sub(px, pq)) <= G.vizinhos && Math.abs(px.y - pq.y) < PIRANBENJA.altura; });
         if (!perto) continue;
-        this.recargaGolpe.set(l + q.numero, this.tempo + 0.35);
-        this.aplicarGolpe(q, l, v, nome, 'tronco', 'normal', PARTE_VIZINHOS * fraco, true);
+        golpe.add('p' + q.numero);
+        this.aplicarGolpe(q, l, v, nome, 'tronco', 'normal', G.tabela * fraco, true, golpe);
       }
     }
   }
 
-  private aplicarGolpe(p: Piranbenja, mao: Lado, v: V3, nome: NomeGolpe, zona: Zona, qualidade: Qualidade, fator: number, vizinho: boolean): void {
+  /** Rebatida da catapulta (C32): punho fechado, movimento de soco (não martelada) e a pata indo contra o projétil. */
+  private rebateValido(p: Piranbenja, vPata: V3, nome: NomeGolpe, punho: boolean): boolean {
+    if (!punho || (nome !== 'soco' && nome !== 'socoLateral' && nome !== 'gancho')) return false;
+    const vp = this.velDe(p), np = len(vp), nv = len(vPata);
+    if (np < 0.5 || nv < 0.5) return false;
+    return -(vp.x * vPata.x + vp.y * vPata.y + vp.z * vPata.z) / (np * nv) > 0.5; // até 60° de diferença
+  }
+
+  private aplicarGolpe(p: Piranbenja, mao: Lado, v: V3, nome: NomeGolpe, zona: Zona, qualidade: Qualidade, fator: number, vizinho: boolean, golpe: Set<string> | null = null): void {
     const G = GOLPES[nome], tipo = G.tipo;
     if (p.unidade) {
       // formação: ninguém voa; o golpe tira da resistência dela (montando, desmancha como strike)
       const dano = len(v) * (tipo === 'impacto' ? 1.6 : 1.0) * MULT_QUALIDADE[qualidade] * fator;
       this.eventos.push({ tipo: 'golpe', mao, numero: p.numero, zona, qualidade, golpe: tipo, nome, vizinho, lancamento: 0 });
       this.ursoAura = Math.min(100, this.ursoAura + 2 * fator);
+      // um golpe conta uma vez para a formação inteira
+      if (golpe) { if (golpe.has('u' + p.unidade.id)) return; golpe.add('u' + p.unidade.id); }
       this.golpearFormacao(p.unidade, dano, this.entrada.maos[mao].pos);
       return;
     }
@@ -941,7 +1006,7 @@ export class Luta {
     let L = lancamento(impacto, p.res / (p.original ? PIRANBENJA.resOriginal : PIRANBENJA.resClone), peso, combo, mq * mz.empurrao) * fator;
     if (qualidade === 'raspao') L = Math.min(L, 3); // raspão nunca decola
     L = Math.min(L, 18);
-    p.res -= (tipo === 'dano' ? 12 : 4) * mq * mz.dano * fator;
+    p.res -= G.dano * mq * mz.dano * fator;
     const atual = this.velDe(p);
     const vh = Math.hypot(v.x, v.z), hx = vh > 0.01 ? v.x / vh : 0, hz = vh > 0.01 ? v.z / vh : 0;
     const u = this.entrada.cabeca, pos = this.posDe(p);
@@ -1216,13 +1281,22 @@ export class Luta {
         v = vec(a.x + v.x * 0.6, Math.max(vy, v.y), a.z + v.z * 0.6);
       }
       this.vooUrso = { v, t0: this.tempo };
-      this.ursoNoArAte = this.tempo + (2 * v.y) / 9.81; this.ursoSentadoAte = 0;
-      this.eventos.push({ ...base, empurrao: { x: 0, z: 0 } }, { tipo: 'ursoDecolou', vel: v });
+      const duracao = (2 * v.y) / 9.81;
+      this.ursoNoArAte = this.tempo + duracao; this.ursoSentadoAte = 0;
+      // decolagem forte: vira boneco solto no PC (o malabarismo mantém o boneco que já existe)
+      const forte = L - EQUILIBRIO.decolarUrso >= EQUILIBRIO.decolagemForte || !!this.ursoBoneco;
+      if (forte && !this.ursoBoneco) {
+        const vh = Math.hypot(v.x, v.z) || 1;
+        this.ursoBoneco = { desde: this.tempo, dir: vec(v.x / vh, 0, v.z / vh), fase: 0, recomposto: 0, botRecompoe: this.bot && this.aleatorio() < 0.5 ? this.tempo + duracao * 0.45 : 0 };
+      }
+      this.eventos.push({ ...base, empurrao: { x: 0, z: 0 } }, { tipo: 'ursoDecolou', vel: v, forte });
       this.bot?.decolar(v);
       if (!noAr && !extra.projetil) this.cameraLenta(1.0);
     } else {
-      this.eventos.push({ ...base, empurrao: { x: dx * L, z: dz * L } });
-      this.bot?.empurrar(dx * L, dz * L);
+      // C32: além de empurrar, levanta um pouco (pulinho), também na visão do Quest
+      const subida = sentado || this.tempo < this.ursoSentadoAte ? 0 : subidaDoEmpurrao(L);
+      this.eventos.push({ ...base, empurrao: { x: dx * L, z: dz * L }, subida });
+      this.bot?.empurrar(dx * L, dz * L, subida);
     }
   }
 
@@ -1622,7 +1696,16 @@ export class Luta {
     this.eventos.push({ tipo: 'catapulta', numero: p.numero, vel: v });
   }
 
-  /** Projéteis da catapulta: batem no urso como soco ×1,5; no braço ou na pata, sem golpe, o urso bloqueia (metade). */
+  /** Guarda contra a catapulta (C32): punho fechado (gatilho e grip) e antebraço de pé, punho para cima, na frente do corpo. */
+  guardaDoUrso(l: Lado): boolean {
+    const m = this.entrada.maos[l]; if (!(m.gatilho > 0.6 && m.grip > 0.6)) return false;
+    const E = this.esqueleto, c = E.cotovelo[l], pa = E.pata[l], d = sub(pa, c), n = len(d) || 1;
+    if (d.y / n < 0.7) return false; // antebraço quase em pé (até ~45° da vertical)
+    return (pa.x - E.peito.x) * E.frente.x + (pa.z - E.peito.z) * E.frente.z > 0.05;
+  }
+
+  /** Projéteis da catapulta: batem no urso como soco ×1,5 (também no braço e na pata). Na guarda (punho fechado e
+   *  para cima), o urso defende: ninguém sofre nada, o projétil só cai no chão um pouco tonto (C32). */
   private projeteis(): void {
     for (const p of [...this.pbs]) {
       if (p.projetilAte <= this.tempo) { if (p.estado === 'projetil') p.estado = 'andando'; continue; }
@@ -1632,12 +1715,19 @@ export class Luta {
       let melhor: { seg: Segmento; d: number; q: V3; e: V3 } | null = null;
       for (const seg of this.esqueleto.segs) { const r = pertoEntreSegmentos(a, b, seg.a, seg.b), d = r.d - seg.r - PIRANBENJA.raio; if (!melhor || d < melhor.d) melhor = { seg, d, q: r.c2, e: r.c1 }; }
       if (!melhor || melhor.d > 0.12) continue;
-      const zona = zonaDoSegmento(melhor.seg.nome), bloqueio = zona === 'braco' || zona === 'pata';
+      const zona = zonaDoSegmento(melhor.seg.nome);
+      const lado: Lado | null = zona === 'braco' || zona === 'pata' ? (melhor.seg.nome.endsWith('E') ? 'esq' : 'dir') : null;
+      if (lado && this.guardaDoUrso(lado)) {
+        p.projetilAte = 0;
+        this.definirVel(p, vec(-v.x * 0.12, 0.6, -v.z * 0.12)); this.atordoar(p, 0.6);
+        this.eventos.push({ tipo: 'defesa', mao: lado, numero: p.numero });
+        continue;
+      }
       const vh = Math.hypot(v.x, v.z), dx = vh > 0.1 ? v.x / vh : 0, dz = vh > 0.1 ? v.z / vh : 1;
       const nrm = sub(melhor.e, melhor.q), nn = len(nrm) || 1;
       const ponto = vec(melhor.q.x + (nrm.x / nn) * melhor.seg.r, melhor.q.y + (nrm.y / nn) * melhor.seg.r, melhor.q.z + (nrm.z / nn) * melhor.seg.r);
       p.projetilAte = 0;
-      this.impactoNoUrso(p, 'soco', melhor.seg, ponto, dx, dz, CATAPULTA.forcaProjetil * (bloqueio ? 0.5 : 1), { projetil: true, bloqueio });
+      this.impactoNoUrso(p, 'soco', melhor.seg, ponto, dx, dz, CATAPULTA.forcaProjetil, { projetil: true });
       this.definirVel(p, vec(-dx * 2, 1.5, -dz * 2)); this.atordoar(p, 1.2);
     }
   }
@@ -1839,7 +1929,48 @@ export class Luta {
       if (p.original) { this.fim('urso'); return; }
       this.derreter(p);
     }
-    if (lenH(this.entrada.cabeca) > RINGUE.raio + 0.3 && !this.opcoes.ursoDeTreino) this.fim('piranbenja');
+    if (this.opcoes.ursoDeTreino) return;
+    // C32: o urso que sai do ringue (andando, empurrado ou caindo de um voo) cai no vazio como o Piranbenja;
+    // a rodada acaba quando a cabeça desce ~1,5 m abaixo do normal (ou 1,5 s depois, se o urso não cair)
+    const fora = lenH(this.entrada.cabeca) > RINGUE.raio + 0.3;
+    if (fora && !this.ursoCaindoDesde && this.tempo >= this.ursoNoArAte) {
+      this.ursoCaindoDesde = this.tempo; this.ursoNoArAte = this.tempo + 10; this.ursoSentadoAte = 0;
+      if (!this.ursoBoneco) { const c = this.entrada.cabeca, n = lenH(c) || 1; this.ursoBoneco = { desde: this.tempo, dir: vec(c.x / n, 0, c.z / n), fase: 0, recomposto: 0, botRecompoe: 0 }; }
+      this.ursoBoneco.recomposto = 0; this.ursoBoneco.botRecompoe = 0;
+      this.eventos.push({ tipo: 'ursoCaindo' }); this.bot?.cair();
+    }
+    if (this.ursoCaindoDesde && (this.entrada.cabeca.y < 0.95 || this.tempo - this.ursoCaindoDesde > 1.5)) this.fim('piranbenja');
+  }
+
+  /** Boneco solto do urso no ar (C32): recompor com o gesto (o bot, metade das vezes) e cair sentado se não conseguiu. */
+  private vooDoUrso(): void {
+    const b = this.ursoBoneco; if (!b || this.ursoCaindoDesde) return;
+    if (!b.recomposto) {
+      if (b.botRecompoe && this.tempo >= b.botRecompoe) this.recompor();
+      else if (!this.bot) {
+        const E = this.esqueleto, pe = E.pata.esq, pd = E.pata.dir, c = this.entrada.cabeca;
+        // 1) braços abertos: patas bem afastadas, cada uma longe da cabeça para o lado
+        const lado = (p: V3) => Math.abs((p.x - c.x) * E.direita.x + (p.z - c.z) * E.direita.z);
+        if (b.fase === 0 && lenH(sub(pe, pd)) >= 1.8 && lado(pe) > 0.7 && lado(pd) > 0.7) b.fase = 1;
+        // 2) depois, as duas patas abaixo da cintura
+        else if (b.fase === 1 && pe.y < E.quadril.y && pd.y < E.quadril.y) this.recompor();
+      }
+    }
+    if (this.tempo >= this.ursoNoArAte) {
+      // chegou ao chão: quem não se recompôs cai sentado
+      if (!b.recomposto && this.rodada === 'luta') this.cairSentado();
+      this.ursoBoneco = null;
+    }
+  }
+  private recompor(): void {
+    if (!this.ursoBoneco || this.ursoBoneco.recomposto) return;
+    this.ursoBoneco.recomposto = this.tempo;
+    this.eventos.push({ tipo: 'ursoRecompos' });
+  }
+  /** Para o desenho no PC: o urso está voando como boneco solto? (giro do tombo e se já se recompôs) */
+  bonecoUrso(): { segundos: number; dir: V3; recompostoHa: number } | null {
+    const b = this.ursoBoneco; if (!b) return null;
+    return { segundos: (b.recomposto || this.tempo) - b.desde, dir: { ...b.dir }, recompostoHa: b.recomposto ? this.tempo - b.recomposto : -1 };
   }
 
   private fim(vencedor: 'urso' | 'piranbenja'): void {

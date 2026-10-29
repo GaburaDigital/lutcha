@@ -7,7 +7,7 @@
 
 import { joinRoom, type Room } from 'trystero';
 
-export const VERSAO_JOGO = 'prototipo-5';
+export const VERSAO_JOGO = 'prototipo-6';
 export type Papel = 'anfitriao' | 'convidado';
 export type TipoConexao = 'local' | 'internet' | 'desconhecida';
 

@@ -328,13 +328,24 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   // ---------- vibração prevista no Quest (online) ----------
   const recarga = new Map<string, number>();
   const anterior: Record<Lado, THREE.Vector3 | null> = { esq: null, dir: null };
+  // C32: como na luta, a velocidade da pata é medida em relação à cabeça (andar, voar e girar não viram golpe)
+  // e golpe precisa de um movimento decidido (~25 cm em 0,25 s)
+  const relAntes: Record<Lado, { t: number; rel: THREE.Vector3 }[]> = { esq: [], dir: [] };
+  let giroAntes = 0;
   function preverContatos(dt: number, agora: number): void {
     const raioMao = URSO.raioMao * (estadoPata.tamanho / 1.3), cab = camera.getWorldPosition(new THREE.Vector3());
+    const giro = rig.rotation.y, girou = Math.abs(giro - giroAntes) > 0.25; giroAntes = giro;
     for (const l of ['esq', 'dir'] as const) {
       const p = posPata(l);
       const a = anterior[l]; anterior[l] = p.clone();
-      if (!a) continue;
-      const vel = { x: (p.x - a.x) / dt, y: (p.y - a.y) / dt, z: (p.z - a.z) / dt }, rapidez = Math.hypot(vel.x, vel.y, vel.z);
+      const rel = p.clone().sub(cab), h = relAntes[l];
+      if (girou) h.length = 0;
+      const ultimo = h[h.length - 1];
+      h.push({ t: agora, rel }); while (h.length > 2 && agora - h[1].t >= 0.25) h.shift();
+      if (!a || !ultimo) continue;
+      const dr = rel.clone().sub(ultimo.rel).divideScalar(dt);
+      const vel = { x: dr.x, y: dr.y, z: dr.z }, percorreu = rel.distanceTo(h[0].rel) >= EQUILIBRIO.percursoMinimoGolpe;
+      const rapidez = percorreu ? Math.hypot(vel.x, vel.y, vel.z) : 0;
       const m = entrada.maos[l], punho = m.gatilhoValor > 0.6 && m.gripValor > 0.6;
       const area = rapidez < EQUILIBRIO.velocidadeMinimaGolpe ? 0 : GOLPES[classificarGolpe(vel, { x: p.x - cab.x, y: 0, z: p.z - cab.z }, punho)].area;
       for (const b of pbs.posicoes()) {
@@ -379,6 +390,8 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       const lado: Lado | null = ev.parte && /E$/.test(ev.parte) && ev.parte !== 'cabeca' ? 'esq' : ev.parte && /D$/.test(ev.parte) && !ev.parte.startsWith('perna') ? 'dir' : null;
       if (lado) vibrar(lado, 1, 160); else { vibrar('esq', ...VIBRACAO.levarGolpe); vibrar('dir', ...VIBRACAO.levarGolpe); }
       empurrao.x += ev.empurrao.x; empurrao.z += ev.empurrao.z;
+      // C32: o empurrão também levanta um pouco (pulinho); no modo Tranquilo (escurecer), não
+      if (ev.subida && ev.subida > 0 && !voo && !escuro && config.decolagem === 'voar' && performance.now() / 1000 >= sentadoAte) voo = new THREE.Vector3(0, ev.subida, 0);
       const c = camera.getWorldPosition(new THREE.Vector3());
       if (ev.combo > 1) onos.mostrar('KA-POW!', { x: c.x, y: c.y - 0.4, z: c.z - 1.2 }, '#4fd6d0', 0.4);
     }
@@ -386,8 +399,15 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
     if (ev.tipo === 'arremessou') vibrar(ev.mao, ...VIBRACAO.arremessar);
     if (ev.tipo === 'strike') { const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.strike, { x: c.x, y: c.y + 0.2, z: c.z - 3 }, '#ff7a6b', 0.9, 1.4); }
     if (ev.tipo === 'fimRodada') avisar(ev.vencedor === 'urso' ? T.fimUrso : T.fimPiranbenja);
-    if (ev.tipo === 'ursoDecolou') decolar(ev.vel);
-    if (ev.tipo === 'novaRodada') { rig.position.set(0, 0, 3); rig.rotation.set(0, 0, 0); empurrao.set(0, 0, 0); voo = null; escuro = null; telaPreta.visible = false; sentadoAte = 0; tontoAte = 0; abaixado = 0; }
+    if (ev.tipo === 'ursoDecolou') {
+      decolar(ev.vel);
+      // decolagem forte: dá para se recompor no ar (braços abertos, depois as patas abaixo da cintura)
+      if (ev.forte && config.placas) { const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.urso.dicaRecompor, { x: c.x, y: c.y + 0.1, z: c.z - 1.6 }, '#ffe066', 0.14, 1.6); }
+    }
+    if (ev.tipo === 'ursoRecompos') { vibrar('esq', ...VIBRACAO.normal); vibrar('dir', ...VIBRACAO.normal); const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.urso.recompos, { x: c.x, y: c.y - 0.2, z: c.z - 1.4 }, '#8fd651', 0.35, 1.1); }
+    if (ev.tipo === 'ursoCaindo') { const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.urso.caindo, { x: c.x, y: c.y - 0.2, z: c.z - 1.4 }, '#ff7a6b', 0.35, 1.2); comecarQueda(); }
+    if (ev.tipo === 'defesa') { vibrar(ev.mao, ...VIBRACAO.normal); const p = ultimaFoto?.piranbenjas.find((x) => x.numero === ev.numero)?.pos; if (p) onos.mostrar(T.urso.defesa, { x: p.x, y: p.y + 0.8, z: p.z }, '#e8f3f2', 0.35, 1.0); }
+    if (ev.tipo === 'novaRodada') { rig.position.set(0, 0, 3); rig.rotation.set(0, 0, 0); empurrao.set(0, 0, 0); voo = null; escuro = null; telaPreta.visible = false; (telaPreta.material as THREE.MeshBasicMaterial).opacity = 0; sentadoAte = 0; tontoAte = 0; abaixado = 0; }
     if (ev.tipo === 'ursoCaiu') {
       sentadoAte = performance.now() / 1000 + ev.segundos; vibrar('esq', ...VIBRACAO.levarGolpe); vibrar('dir', ...VIBRACAO.levarGolpe);
       const c = camera.getWorldPosition(new THREE.Vector3()); onos.mostrar(T.urso.caiu, { x: c.x, y: c.y - 0.2, z: c.z - 1.4 }, '#c58fff', 0.35, 1.2);
@@ -412,7 +432,15 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
   let escuro: { t: number; destino: THREE.Vector3; mudou: boolean } | null = null;
   const telaPreta = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthTest: false }));
   telaPreta.position.set(0, 0, -0.15); telaPreta.renderOrder = 99; telaPreta.visible = false; camera.add(telaPreta);
-  const dentroDoRingue = (p: THREE.Vector3) => Math.hypot(p.x, p.z) <= RINGUE.raio;
+  // a mesma borda que a luta usa para saber se o urso saiu (raio + 0,3 m)
+  const dentroDoRingue = (p: THREE.Vector3) => Math.hypot(p.x, p.z) <= RINGUE.raio + 0.3;
+  /** C32: saiu do ringue andando ou empurrado: cai no vazio (Insano: cai junto; Tranquilo: escurece). */
+  function comecarQueda(): void {
+    if (voo || escuro) return;
+    rig.position.y -= abaixado; abaixado = 0; sentadoAte = 0;
+    if (config.decolagem === 'voar') { voo = new THREE.Vector3(empurrao.x * 0.5, 0, empurrao.z * 0.5); empurrao.set(0, 0, 0); return; }
+    escuro = { t: 0, destino: rig.position.clone().add(new THREE.Vector3(0, -6, 0)), mudou: false }; telaPreta.visible = true;
+  }
   // sentado (barra de equilíbrio cheia): a visão desce ~1 m em 0,4 s; tonto: balança um pouco
   let sentadoAte = 0, tontoAte = 0, abaixado = 0, piscar = -1;
   function sentarETonto(dt: number, agora: number): void {
@@ -454,6 +482,8 @@ export async function iniciarQuest(raiz: HTMLElement, op: OpcoesQuest): Promise<
       if (escuro.t >= 0.25 && !escuro.mudou) { rig.position.copy(escuro.destino); escuro.mudou = true; }
       if (escuro.t > 0.8) { escuro = null; telaPreta.visible = false; }
     }
+    // caindo no vazio (C32): a visão escurece aos poucos e fica escura até a próxima rodada
+    if (rig.position.y < -1) { telaPreta.visible = true; (telaPreta.material as THREE.MeshBasicMaterial).opacity = Math.min(0.9, Math.max(0.5, (-rig.position.y - 1) / 2.5)); }
   }
 
   // ---------- quadro a quadro ----------

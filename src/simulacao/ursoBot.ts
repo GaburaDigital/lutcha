@@ -34,6 +34,7 @@ export class UrsoBot {
   private empurrao = v(0, 0, 0);       // escorrega depois de levar soco
   private voo: V3 | null = null;       // velocidade enquanto voa (decolou)
   private altura = 0;                  // quanto está acima do chão (ou abaixo, se caiu fora do ringue)
+  private pulo = 0;                    // pulinho de um empurrão (C32): velocidade para cima, sem virar voo
   private sentadoAte = 0;              // caiu sentado: não anda nem ataca
   private abaixar = 0;                 // quanto a cabeça desce sentado (m)
   private tontoAte = 0;
@@ -43,7 +44,7 @@ export class UrsoBot {
     this.maos = { esq: { pos: this.descanso('esq', 0), gatilho: 0, grip: 0 }, dir: { pos: this.descanso('dir', 0), gatilho: 0, grip: 0 } };
   }
 
-  reiniciar(): void { this.x = 0; this.z = 3; this.giro = 0; this.plano = null; this.esperaAte = this.tempo + 1; this.alvoAndar = null; this.voo = null; this.altura = 0; this.empurrao = v(0, 0, 0); this.sentadoAte = 0; this.abaixar = 0; this.tontoAte = 0; this.rebatidos.clear(); }
+  reiniciar(): void { this.pulo = 0; this.x = 0; this.z = 3; this.giro = 0; this.plano = null; this.esperaAte = this.tempo + 1; this.alvoAndar = null; this.voo = null; this.altura = 0; this.empurrao = v(0, 0, 0); this.sentadoAte = 0; this.abaixar = 0; this.tontoAte = 0; this.rebatidos.clear(); }
   /** Barra de equilíbrio cheia: senta no chão (a cabeça desce ~0,9 m). */
   sentar(segundos: number): void { this.sentadoAte = this.tempo + segundos; this.plano = null; }
   tonto(segundos: number): void { this.tontoAte = this.tempo + segundos; }
@@ -51,7 +52,12 @@ export class UrsoBot {
   deslocar(dx: number, dz: number): void { this.x += dx; this.z += dz; }
 
   /** Levou soco: escorrega um pouco (perde força aos poucos). */
-  empurrar(vx: number, vz: number): void { this.empurrao = soma(this.empurrao, v(vx, 0, vz)); }
+  empurrar(vx: number, vz: number, subida = 0): void {
+    this.empurrao = soma(this.empurrao, v(vx, 0, vz));
+    if (!this.voo && this.altura <= 0.01 && subida > 0) this.pulo = subida; // C32: pulinho
+  }
+  /** Saiu do ringue (C32): cai no vazio. */
+  cair(): void { if (!this.voo) this.voo = v(this.empurrao.x * 0.5, Math.max(0, this.pulo), this.empurrao.z * 0.5); this.pulo = 0; this.plano = null; }
   /** Decolou: voa em arco; no ar não ataca; se cair fora do ringue, continua caindo. */
   decolar(vel: V3): void { this.voo = { ...vel }; this.plano = null; this.sentadoAte = 0; }
   get noAr(): boolean { return !!this.voo; }
@@ -69,6 +75,10 @@ export class UrsoBot {
     // escorregar e voar valem para todos os jeitos (até o parado é empurrado)
     this.x += this.empurrao.x * dt; this.z += this.empurrao.z * dt;
     this.empurrao = vezes(this.empurrao, Math.exp(-2.5 * dt));
+    if (!this.voo && (this.altura > 0 || this.pulo > 0)) {
+      this.altura += this.pulo * dt; this.pulo -= 9.81 * dt;
+      if (this.altura <= 0) { this.altura = 0; this.pulo = 0; }
+    }
     if (this.voo) {
       this.x += this.voo.x * dt; this.z += this.voo.z * dt; this.altura += this.voo.y * dt; this.voo.y -= 9.81 * dt;
       const dentro = Math.hypot(this.x, this.z) <= RINGUE.raio;
