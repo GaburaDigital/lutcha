@@ -96,7 +96,10 @@ function texturaPlaca(texto: string, cor: string): THREE.CanvasTexture {
   const g = c.getContext('2d')!;
   g.fillStyle = 'rgba(12,26,36,0.85)'; g.beginPath(); g.roundRect(4, 4, 376, 88, 24); g.fill();
   g.strokeStyle = cor; g.lineWidth = 6; g.stroke();
-  g.font = '900 54px "Baloo 2", Nunito, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = cor; g.fillText(texto, 192, 52);
+  // a letra diminui para caber (palavras longas como "POSE BIZARRA!" não podem sair cortadas)
+  let px = 54; g.font = `900 ${px}px "Baloo 2", Nunito, sans-serif`;
+  while (px > 24 && g.measureText(texto).width > 340) { px -= 2; g.font = `900 ${px}px "Baloo 2", Nunito, sans-serif`; }
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = cor; g.fillText(texto, 192, 52);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; texturasPlaca.set(chave, t); return t;
 }
 
@@ -159,14 +162,16 @@ export class Piranbenjas {
       b.anel.visible = !!op.ajudas && !!corEstado && !p.partes;
       if (b.anel.visible) { b.anel.position.set(p.pos.x, 0.02, p.pos.z); (b.anel.material as THREE.MeshBasicMaterial).color.set(corEstado!); }
       const qual = p.ataque === 'morder' ? 'morder' : p.ataque === 'tapa' ? 'tapa' : p.ataque === 'cabecada' ? 'cabecada' : p.ataque === 'chute' ? 'chute' : 'socar';
-      const texto = !op.ajudas || p.grudado ? '' : p.estado === 'aproximando' ? T.intencao.aproximando
+      // distração (dancinha, careta, pose): placa nas ajudas do teste, além do movimento do boneco
+      const texto = !op.ajudas || p.grudado ? '' : p.distracao ? T.intencao[p.distracao] : p.estado === 'aproximando' ? T.intencao.aproximando
         : p.estado === 'armando' ? T.intencao[`armando_${qual}`]
         : p.estado === 'atacando' ? T.intencao[`atacando_${qual}`]
         : p.estado === 'escalando' ? T.intencao.escalando
         : p.estado === 'recuando' ? T.intencao.recuando : ''; // atordoado e caído já mostram as estrelinhas
       b.placa.visible = !!texto;
       if (texto) {
-        if (b.placaTexto !== texto + corEstado) { (b.placa.material as THREE.SpriteMaterial).map = texturaPlaca(texto, corEstado ?? '#e8f3f2'); (b.placa.material as THREE.SpriteMaterial).needsUpdate = true; b.placaTexto = texto + corEstado; }
+        const cor = p.distracao ? '#c58fff' : corEstado ?? '#e8f3f2';
+        if (b.placaTexto !== texto + cor) { (b.placa.material as THREE.SpriteMaterial).map = texturaPlaca(texto, cor); (b.placa.material as THREE.SpriteMaterial).needsUpdate = true; b.placaTexto = texto + cor; }
         b.placa.position.set(cabeca.x, cabeca.y + 0.5, cabeca.z); b.placa.scale.set(0.4, 0.1, 1);
       }
       if (op.destaque === p.numero && op.marca) { op.marca.position.set(p.pos.x, 0.02, p.pos.z); op.marca.visible = true; }

@@ -44,3 +44,14 @@ def abrir(p, w=1280, h=720):
 def T(pg, js):
     """Roda um trecho de JS com `t` = window.__teste."""
     return pg.evaluate('() => { const t = window.__teste; ' + js + ' }')
+
+def ate(pg, js, segundos=6.0, passo=0.1):
+    """Espera até o trecho de JS (com `t` = window.__teste) devolver algo verdadeiro e devolve o último valor.
+    O Chrome sem tela desenha poucos quadros e numa máquina lenta menos ainda: esperar um tempo fixo deixava os
+    testes instáveis (D-336). Esperar a condição, com limite, deixa o teste certo nas máquinas rápidas e nas lentas."""
+    fim = time.time() + segundos
+    v = None
+    while True:
+        v = T(pg, js)
+        if v or time.time() >= fim: return v
+        time.sleep(passo)

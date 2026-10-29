@@ -37,7 +37,7 @@ with servidor(), sync_playwright() as p:
     quest.goto(URL + '?modo=quest&canal=local&codigo=TESTE'); quest.wait_for_function('() => window.__teste')
     quest.evaluate('() => {' + VR + '}'); J(quest, '__vr.ligar()')
     quest.wait_for_function('() => window.__teste.canal && window.__teste.canal.conectado()', timeout=15000)
-    time.sleep(2)
+    ate(quest, 'return t.fotos.length > 5', 10)
     confere('PC e Quest conectados', J(pc, 'return t.canal.conectado()') and J(quest, 'return t.canal.conectado()'))
     confere('o urso de treino sai quando o Quest entra', J(pc, 'return t.luta.opcoes.ursoDeTreino') is False)
     nq = J(quest, 'return t.fotos.length'); npb = J(pc, 'return t.luta.foto().piranbenjas.length'); nqpb = J(quest, 'return t.fotos.at(-1).f.piranbenjas.length')
@@ -49,7 +49,8 @@ with servidor(), sync_playwright() as p:
     confere('o Quest não recebe quem é o original', chaves == ['achatado', 'agarrado', 'ataque', 'distracao', 'estado', 'grudado', 'numero', 'partes', 'pos', 'rot', 'voando'], chaves)
     # números sorteados de novo quando o PC cria clones (tecla C)
     antes = J(quest, 'return t.fotos.at(-1).f.piranbenjas.map(p => p.numero)')
-    pc.bring_to_front(); pc.keyboard.press('c'); time.sleep(1.5)
+    pc.bring_to_front(); pc.keyboard.press('c')
+    ate(quest, f'return t.fotos.at(-1).f.piranbenjas.length === {len(antes) + 2}', 6)
     depois = J(quest, 'return t.fotos.at(-1).f.piranbenjas.map(p => p.numero)')
     confere('clones novos e números sorteados de novo', len(depois) == len(antes) + 2 and len(set(antes) & set(depois)) <= 1, f'{len(antes)} → {len(depois)}')
     # golpe pela rede: a pata direita passa rápido pelo Piranbenja mais perto, com o punho fechado.
@@ -63,7 +64,8 @@ with servidor(), sync_playwright() as p:
     J(pc, f"t.luta.testeColocar({alvo[3]}, {{ x: 0, y: 0.47, z: 1.7 }})"); time.sleep(0.8)
     quest.evaluate("""async () => { window.__vib = []; __vr.dedos('dir', 1, 1);
       for (let i = 0; i <= 14; i++) { __vr.maoMundo('dir', 0, 0.6, 2.4 - i * 0.08); window.__teste.enviarAgora(); await new Promise(r => setTimeout(r, 30)); } }""")
-    time.sleep(1.2)
+    ate(pc, "return document.querySelector('#log').innerText.includes('Pata direita')", 5)
+    ate(quest, "return (window.__vib || []).some(v => v[0] === 'dir' && v[2] >= 60)", 3)
     log = pc.inner_text('#log')
     vib = quest.evaluate('() => window.__vib || []')
     confere('golpe da pata do Quest registrado no PC', 'Pata direita' in log, log.splitlines()[:3])
@@ -78,12 +80,13 @@ with servidor(), sync_playwright() as p:
     solo.goto(URL + '?modo=solo&formacao=piramide&comportamento=parados'); solo.wait_for_function('() => window.__teste && window.__teste.luta')
     solo.evaluate('() => {' + VR + '}'); solo.evaluate('() => window.__vr.ligar()')
     J(solo, 't.config.esticar = 1')
-    solo.evaluate("() => { __vr.maoMundo('esq', -0.5, 1.4, 2.4); __vr.maoMundo('dir', 0.3, 1.4, 2.4); }"); time.sleep(2)
+    solo.evaluate("() => { __vr.maoMundo('esq', -0.5, 1.4, 2.4); __vr.maoMundo('dir', 0.3, 1.4, 2.4); }")
+    ate(solo, 'return t.luta.foto().formacoes.length === 1 && t.luta.foto().piranbenjas.length === 7', 8); time.sleep(0.5)
     confere('solo começa com a pirâmide', J(solo, 'return t.luta.foto().piranbenjas.length') == 7 and J(solo, "return t.luta.foto().piranbenjas.filter(p => p.estado === 'formacao').length") == 6
             and J(solo, 'return t.luta.foto().formacoes.length') == 1)
     solo.evaluate("""async () => { window.__vib = []; __vr.dedos('dir', 1, 1); await new Promise(r => setTimeout(r, 400));
       for (let i = 0; i <= 5; i++) { __vr.maoMundo('dir', 0.05, 0.5, 2.4 - i * 0.2); await new Promise(r => setTimeout(r, 260)); } }""")  # passos de 20 cm: acima da velocidade mínima de golpe mesmo com poucos quadros
-    time.sleep(0.3)
+    ate(solo, "return t.acertos >= 1 && (window.__vib || []).some(v => v[0] === 'dir' && v[2] >= 60)", 4)
     solo.screenshot(path=F + 'rede_04_solo_piramide_soco.png')
     vib = solo.evaluate('() => window.__vib || []')
     confere('solo: soco na pirâmide acerta e vibra', J(solo, 'return t.acertos') >= 1 and any(v[0] == 'dir' and v[2] >= 60 for v in vib), {'acertos': J(solo, 'return t.acertos'), 'vib': vib[:3]})
@@ -108,32 +111,35 @@ with servidor(), sync_playwright() as p:
         if menor < -0.8: break
         time.sleep(0.1)
     confere('Quest: cair sentado abaixa a visão', menor < -0.8, menor)
-    time.sleep(3)
+    ate(solo, 'return t.abaixado > -0.1', 8)
     confere('Quest: levanta depois de 2 s', J(solo, 'return t.abaixado') > -0.1, J(solo, 'return t.abaixado'))
     # relógio: apagado com o pulso virado para fora; acende quando as costas do pulso viram para os olhos
     # mão esquerda na frente do rosto, um pouco abaixo dos olhos (onde se olha um relógio)
-    solo.evaluate("() => { __vr.dedos('dir', 0, 0); __vr.maoMundo('esq', 0, 2.0, 2.4); __vr.maoMundo('dir', 0.4, 1.3, 2.4); window.__teste.entrada.maos.esq.pose.quaternion.identity(); }"); time.sleep(0.8)
+    solo.evaluate("() => { __vr.dedos('dir', 0, 0); __vr.maoMundo('esq', 0, 2.0, 2.4); __vr.maoMundo('dir', 0.4, 1.3, 2.4); window.__teste.entrada.maos.esq.pose.quaternion.identity(); }")
+    time.sleep(0.5); ate(solo, 'return !t.pulsoVisivel', 4)
     apagado = J(solo, 'return t.pulsoVisivel')  # costas do pulso viradas para o lado
     solo.evaluate("""() => { const t = window.__teste, V = t.THREE.Vector3; const para = new V(0, 0.45, 0.6).normalize();
-      t.entrada.maos.esq.pose.quaternion.setFromUnitVectors(new V(-1, 0, 0), para); }"""); time.sleep(0.8)
-    aceso = J(solo, 'return t.pulsoVisivel')  # costas do pulso viradas para os olhos
+      t.entrada.maos.esq.pose.quaternion.setFromUnitVectors(new V(-1, 0, 0), para); }""")
+    aceso = ate(solo, 'return t.pulsoVisivel', 4)  # costas do pulso viradas para os olhos
     confere('relógio só acende ao olhar o pulso', apagado is False and aceso is True, {'apagado': apagado, 'aceso': aceso})
     # pausa: segurar Y por 1 s abre as opções e congela a luta
-    solo.evaluate("() => { const b = window.__teste.entrada.maos.esq.fonte.gamepad.buttons[5]; b.pressed = true; b.value = 1; }"); time.sleep(2.2)
+    solo.evaluate("() => { const b = window.__teste.entrada.maos.esq.fonte.gamepad.buttons[5]; b.pressed = true; b.value = 1; }")
+    ate(solo, 'return t.pausado', 8)  # segurar Y por 1 s, contado nos quadros que o Chrome sem tela consegue desenhar
     solo.evaluate("() => { const b = window.__teste.entrada.maos.esq.fonte.gamepad.buttons[5]; b.pressed = false; b.value = 0; }"); time.sleep(0.5)
     tick1 = J(solo, 'return t.luta.foto().tick'); time.sleep(1); tick2 = J(solo, 'return t.luta.foto().tick')
     confere('pausa com Y congela a luta', J(solo, 'return t.pausado') is True and tick1 == tick2, {'pausado': J(solo, 'return t.pausado'), 'ticks': [tick1, tick2]})
     solo.screenshot(path=F + 'rede_06_solo_pausa.png')
     J(solo, 't.fecharPausa()')
     # decolagem no Quest: voa junto (padrão) e volta ao chão; com "escurecer", a tela escurece e ele aparece onde caiu
-    J(solo, "t.luta.eventos.push({ tipo: 'ursoDecolou', vel: { x: 0, y: 5, z: -1 } })"); time.sleep(0.8)
+    J(solo, "t.luta.eventos.push({ tipo: 'ursoDecolou', vel: { x: 0, y: 5, z: -1 } })")
+    ate(solo, 'return t.voando && t.rig.position.y > 0.2', 4)
     no_ar = J(solo, 'return [t.voando, +t.rig.position.y.toFixed(2)]')
     for _ in range(30):
         time.sleep(0.3)
         if not J(solo, 'return t.voando'): break
     pousou = J(solo, 'return [t.voando, +t.rig.position.y.toFixed(2)]')
-    J(solo, "t.config.decolagem = 'escurecer'; t.luta.eventos.push({ tipo: 'ursoDecolou', vel: { x: 0, y: 5, z: -1 } })"); time.sleep(0.6)
-    escuro = J(solo, 'return t.voando')
+    J(solo, "t.config.decolagem = 'escurecer'; t.luta.eventos.push({ tipo: 'ursoDecolou', vel: { x: 0, y: 5, z: -1 } })")
+    escuro = ate(solo, 'return t.voando', 3)
     confere('decolagem no Quest: voa e pousa; escurecer também funciona', no_ar[0] and no_ar[1] > 0.2 and not pousou[0] and pousou[1] == 0 and escuro is True, {'no ar': no_ar, 'pousou': pousou, 'escuro': escuro})
     # clones cautelosos com as placas de intenção
     solo2 = ctx.new_page(); solo2.on('pageerror', lambda e: erros.append('PAGEERROR ' + str(e)))
@@ -143,7 +149,8 @@ with servidor(), sync_playwright() as p:
     # o Chromium sem tela anda devagar: os clones já começam a 1,6 m do urso
     J(solo2, 't.luta.testeNumeros().forEach((n, i, a) => { const ang = Math.PI + (i - a.length / 2) * 0.4; t.luta.testeColocar(n, { x: Math.sin(ang) * 1.6, y: 0.47, z: 3 + Math.cos(ang) * 1.6 }); })')
     estados = set()
-    for _ in range(16):
+    for _ in range(40):  # até 20 s: numa máquina lenta os clones demoram a chegar
+        if {'aproximando', 'armando'} <= estados: break
         time.sleep(0.5); estados |= set(J(solo2, 'return t.luta.foto().piranbenjas.map(p => p.estado)'))
         if 'armando' in estados and not solo2.evaluate('() => window.__fotoArmando'):
             solo2.evaluate('() => { window.__fotoArmando = true; }'); solo2.screenshot(path=F + 'rede_07_solo_armando.png')
